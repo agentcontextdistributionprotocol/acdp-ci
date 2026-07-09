@@ -25,7 +25,10 @@ ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py 
 checks_for() {
   case "$1" in
     acdp-control-plane)
-      printf '%s\n' "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)" ;;
+      # NB: matches main's COMMITTED ci.yml. An in-flight working-tree ci.yml
+      # renames these to "lint + tsc + jest (unit, coverage-gated)" and adds
+      # "docker build (no push)" — update here when that lands on main.
+      printf '%s\n' "tsc + jest (unit)" "jest integration (Postgres)" ;;
     acdp-registry-rs)
       printf '%s\n' "rustfmt" "clippy" "tests" ;;
     acdp-playground)
