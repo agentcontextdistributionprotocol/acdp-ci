@@ -76,7 +76,7 @@ jobs:
           if [ -z "$TARGET" ]; then
             case "$ECO" in
               npm)   TARGET=$(npm view "$PKG" version) ;;
-              cargo) TARGET=$(curl -fsSL "https://crates.io/api/v1/crates/$PKG" | jq -r '.crate.max_stable_version') ;;
+              cargo) TARGET=$(curl -fsSL -A 'acdp-ci-bump' "https://crates.io/api/v1/crates/$PKG" | jq -r '.crate.max_stable_version') ;;
               uv)    TARGET=$(curl -fsSL "https://pypi.org/pypi/$PKG/json"       | jq -r '.info.version') ;;
               *) echo "::error::unknown ecosystem $ECO"; exit 1 ;;
             esac
@@ -84,8 +84,8 @@ jobs:
           TARGET="${TARGET#v}"
           case "$ECO" in
             npm)   CURRENT=$(node -e "const l=require('./package-lock.json').packages;const p=l['node_modules/'+process.env.PKG]||l['node_modules/'+process.env.PKG.split('/').pop()];process.stdout.write(p?p.version:'')" ) ;;
-            cargo) CURRENT=$(awk -v p="$PKG" '$0=="name = \""p"\""{f=1} f&&/^version = /{gsub(/[version ="]/,"");print;exit}' Cargo.lock) ;;
-            uv)    CURRENT=$(awk -v p="$PKG" 'f&&/version = /{gsub(/[version ="]/,"");print;exit} $0=="name = \""p"\""{f=1}' uv.lock) ;;
+            cargo) CURRENT=$(awk -v p="$PKG" '$0=="name = \""p"\""{f=1} f&&/^version = /{v=$0;sub(/^version = "/,"",v);sub(/"$/,"",v);print v;exit}' Cargo.lock) ;;
+            uv)    CURRENT=$(awk -v p="$PKG" '$0=="name = \""p"\""{f=1} f&&/^version = /{v=$0;sub(/^version = "/,"",v);sub(/"$/,"",v);print v;exit}' uv.lock) ;;
           esac
           echo "target=$TARGET"   >> "$GITHUB_OUTPUT"
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
@@ -118,7 +118,7 @@ jobs:
           for i in $(seq 1 24); do
             case "$ECO" in
               npm)   [ "$(npm view "$PKG@$T" version 2>/dev/null || true)" = "$T" ] && { echo ok; exit 0; } ;;
-              cargo) curl -fsSL "https://crates.io/api/v1/crates/$PKG/$T" >/dev/null 2>&1 && { echo ok; exit 0; } ;;
+              cargo) curl -fsSL -A 'acdp-ci-bump' "https://crates.io/api/v1/crates/$PKG/$T" >/dev/null 2>&1 && { echo ok; exit 0; } ;;
               uv)    curl -fsSL "https://pypi.org/pypi/$PKG/$T/json"       >/dev/null 2>&1 && { echo ok; exit 0; } ;;
             esac
             echo "waiting for $PKG@$T ($i/24)…"; sleep 5
@@ -151,9 +151,20 @@ jobs:
               '
               npm install --package-lock-only ;;
             cargo)
-              curl -fsSL --proto "=https" --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1 || true
+              command -v cargo >/dev/null || { curl -fsSL --proto "=https" --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1; }
               source "$HOME/.cargo/env" 2>/dev/null || true
-              cargo add "$PKG@$T" ;;
+              # Bump the version requirement in Cargo.toml in place — preserving
+              # features / table form, handling [dependencies] and
+              # [workspace.dependencies] — then re-lock. `cargo add` can't target
+              # a virtual workspace, and won't survive a featured table cleanly.
+              PKG="$PKG" T="$T" perl -i -pe '
+                my $p = quotemeta($ENV{PKG}); my $v = $ENV{T};
+                if (/^\s*$p\s*=/) {
+                  if (/\{/) { s/(version\s*=\s*")[^"]+(")/$1$v$2/ }
+                  else      { s/=\s*"[^"]+"/= "$v"/ }
+                }
+              ' Cargo.toml
+              cargo update -p "$PKG" --precise "$T" ;;
             uv)
               curl -fsSL https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
               export PATH="$HOME/.local/bin:$PATH"
