@@ -19,7 +19,7 @@
 set -euo pipefail
 
 ORG=agentcontextdistributionprotocol
-ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console"
+ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol"
 
 # Emits one required check-name per line for the given repo (non-zero if unknown).
 checks_for() {
@@ -37,6 +37,8 @@ checks_for() {
       printf '%s\n' "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" ;;
     acdp-ui-console)
       printf '%s\n' "Lint · Typecheck · Test · Build" ;;
+    agentcontextdistributionprotocol)  # the spec/RFC repo
+      printf '%s\n' "All Validations Passed" "Validate Schemas, Examples, and Conformance" ;;
     *) return 1 ;;
   esac
 }
