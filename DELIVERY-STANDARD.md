@@ -35,6 +35,45 @@ no `bump-acdp`:
   core (for spec Final promotion). Its independence from `acdp-rs` is the point.
 - **acdp-ui-console**, **acdp-website** — Vercel deploys.
 
+## Propagation mechanics
+
+Two propagation lanes, both event-driven, both App-authenticated, both with a
+Dependabot safety net.
+
+### SDK propagation (a new `acdp` package → its consumers)
+
+1. `acdp-rs` publishes (`release-plz` crate / `bindings-release` npm tag /
+   `acdp-py-release` PyPI tag). Each publish job, on a real publish, mints an
+   App token scoped to the consumer and POSTs `repository_dispatch: acdp-released`
+   with `client_payload {version, ecosystem}`.
+   - crate → `acdp-registry-rs` (detected from release-plz's `releases` output;
+     other workspace crates are ignored)
+   - npm → `acdp-control-plane` (version from the `acdp-node-v*` tag)
+   - PyPI → `acdp-playground` (version from the `acdp-py-v*` tag)
+2. The consumer's thin `bump-acdp.yml` calls `bump-consume.yml@v1`, which:
+   resolves the target, **waits for the registry to actually serve it** (npm CDN
+   / crates.io index / PyPI can lag a publish), bumps the manifest + lockfile for
+   the ecosystem (`npm` rewrites the dep and any `npm:` alias; `cargo` edits the
+   version in place preserving `features`, virtual-workspace-safe, then
+   `cargo update --precise`; `uv` runs `uv lock --upgrade-package`), opens a PR,
+   and arms auto-merge **unless the bump is breaking** (major, or a `0.x` minor).
+3. Missed dispatch → Dependabot's weekly `acdp` group opens the same PR later.
+
+### Spec propagation (a new spec revision → its SHA-pinners)
+
+The spec (`agentcontextdistributionprotocol`) is a **dependency pinned by git
+SHA** in consumers' CI (currently only `acdp-rs` pins it; `acdp-verifier-py`
+tracks the default branch, so nothing to bump).
+
+1. On a conformance-relevant push (`schemas/**`, `examples/**`, `rfcs/**`),
+   the spec repo's `notify-spec-consumers.yml` dispatches
+   `repository_dispatch: spec-released {sha}` to each pinner.
+2. The pinner's `bump-spec.yml` calls `bump-spec-ref.yml@v1`, which rewrites the
+   pinned `ref:` in the target workflow file and opens a PR that is **never
+   auto-merged** — the PR's own conformance CI runs against the new fixtures, and
+   a human adopts the new spec deliberately (the pin exists precisely so spec
+   changes never silently alter CI).
+
 ## Merge policy
 
 Patch + minor auto-merge on a green pipeline; **majors are held** for a human
@@ -43,11 +82,22 @@ Patch + minor auto-merge on a green pipeline; **majors are held** for a human
 
 ## Credentials
 
-One GitHub App (`acdp-deps-bot`, Contents RW + Pull requests RW), installed
-org-wide, key stored once as org secrets `ACDP_BOT_APP_ID` /
-`ACDP_BOT_PRIVATE_KEY`. Every cross-repo dispatch and every bot PR mints a
-short-lived installation token from it — **zero PATs**. Registry-publish tokens
-stay in `acdp-rs`.
+One GitHub App (`acdp-deps-bot`), installed org-wide, key stored once as org
+secrets `ACDP_BOT_APP_ID` / `ACDP_BOT_PRIVATE_KEY`. Every cross-repo dispatch and
+every bot PR mints a short-lived installation token from it — **zero PATs**.
+Registry-publish tokens (`NPM_TOKEN`, `CARGO_REGISTRY_TOKEN`; PyPI is OIDC) stay
+in `acdp-rs`.
+
+App repository permissions:
+
+| Permission | Why |
+|---|---|
+| Contents: Read/write | commit bump branches; POST `repository_dispatch` |
+| Pull requests: Read/write | open the bump PRs |
+| **Workflows: Read/write** | **required** for `bump-spec-ref` — the spec pin lives in `.github/workflows/ci.yml`, and GitHub blocks an App from pushing changes under `.github/workflows/` without it |
+
+`bump-consume` (manifests/lockfiles) does not need Workflows; only spec-pin
+propagation does.
 
 ## Repo matrix
 
