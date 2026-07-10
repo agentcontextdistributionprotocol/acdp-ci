@@ -80,6 +80,37 @@ Patch + minor auto-merge on a green pipeline; **majors are held** for a human
 (Dependabot majors, and breaking SDK bumps — `major`, or a `minor` while
 `0.x` — from `bump-consume`).
 
+## CI baseline
+
+Auto-merge only ships what CI vouches for, so every repo's `main` protection must
+require a pipeline that meets this bar. **The principles are uniform; how each
+ecosystem satisfies them is not** — do not port one repo's tooling into another
+(a Rust repo's gate is clippy, not `ci-conventions.sh`).
+
+Every repo:
+
+- [ ] **Format** enforced, not advisory — rustfmt / ruff format / prettier
+- [ ] **Lint** at zero warnings — clippy `-D warnings` / ruff / eslint `--max-warnings 0`
+- [ ] **Type-check** — `tsc --noEmit` / mypy `--strict` (native to Rust)
+- [ ] **Tests + coverage gate** — thresholds enforced in CI, not merely measured
+- [ ] **Convention / supply-chain checks** where the repo defines them — e.g.
+      control-plane `scripts/ci-conventions.sh`; acdp-rs `cargo-deny` + `cargo-vet`
+      + `cargo-semver-checks`
+
+Ships a container image → additionally:
+
+- [ ] **`docker build` (no push) on PRs** — a broken Dockerfile fails at PR time,
+      not release time
+- [ ] **Boot / smoke before publish** — boot the built image (or run a
+      golden-vector / conformance smoke) so an unbootable artifact never reaches
+      the registry or a deploy
+
+The jobs satisfying this bar are the **required status checks** on `main`
+(configured by `scripts/standardize.sh`), so a red gate blocks the merge and
+auto-merge never overrides it. All current repos meet this baseline (see the Repo
+matrix); acdp-rs exceeds it. New SDK repos (Java / Go / Kotlin) inherit the bar,
+satisfied by their own ecosystem's tools.
+
 ## Credentials
 
 One GitHub App (`acdp-deps-bot`), installed org-wide, key stored once as org
