@@ -18,7 +18,7 @@ repo stays uniform instead of drifting.
 
 | Script | Purpose |
 |---|---|
-| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection + `allow_auto_merge` + required checks to every repo. |
+| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection to every managed repo. `allow_auto_merge` and required status checks are per-repo — zero-check repos (`acdp-ci`, `.github`) get protection only, never auto-merge. |
 
 See **[DELIVERY-STANDARD.md](DELIVERY-STANDARD.md)** for the full model
 (dependency-propagation graph, credential design, rollout).
