@@ -205,10 +205,23 @@ with no known-good remedy).
 
 ```sh
 # 1. Record pre-move state FIRST — this is the only rollback anchor.
-git ls-remote --tags origin v1
-#   <tag-object-sha>  refs/tags/v1      <- annotated tag object   -> OLD_V1_TAG_OBJ
-#   <commit-sha>      refs/tags/v1^{}   <- commit v1 points at    -> OLD_V1_COMMIT
-# Use the REMOTE values; the local tag may be stale. Paste both into the PR thread.
+# NOTE: do NOT pass "v1" as a ls-remote pattern here — a refname pattern matches
+# against the ref's last path component, and "v1" does not match "v1^{}", so a
+# filtered `git ls-remote --tags origin v1` silently drops the peeled line you
+# need. Always list unfiltered, then pick the two lines out with awk/grep.
+git ls-remote --tags origin
+#   <tag-object-sha>  refs/tags/v1      <- annotated tag object
+#   <commit-sha>      refs/tags/v1^{}   <- commit v1 points at
+OLD_V1_TAG_OBJ=$(git ls-remote --tags origin | awk '$2=="refs/tags/v1"{print $1}')
+OLD_V1_COMMIT=$(git ls-remote --tags origin | awk '$2=="refs/tags/v1^{}"{print $1}')
+# Do not proceed on an empty value, or step 6's rollback silently DELETES v1
+# instead of restoring it (an empty $OLD_V1_TAG_OBJ makes the refspec "+:refs/tags/v1").
+if [ -z "$OLD_V1_TAG_OBJ" ] || [ -z "$OLD_V1_COMMIT" ]; then
+  echo "FAILED to capture pre-move state — STOP, do not proceed" >&2
+  return 1 2>/dev/null || exit 1
+fi
+echo "OLD_V1_TAG_OBJ=$OLD_V1_TAG_OBJ  OLD_V1_COMMIT=$OLD_V1_COMMIT"
+# Paste both into the PR thread.
 
 # 2. Fetch (force, so the old tag object stays in the local object store) and identify the target.
 git fetch origin main '+refs/tags/v1:refs/tags/v1'
@@ -227,8 +240,9 @@ git push origin refs/tags/v1 --force     # equivalently: git push origin '+refs/
 # NEVER `git push --tags -f`: that force-pushes every local tag, silently clobbering or
 # resurrecting others. The explicit refspec touches refs/tags/v1 and nothing else.
 
-# 5. Verify.
-git ls-remote --tags origin v1   # the ^{} line must now show $NEW_SHA
+# 5. Verify. (Unfiltered again — see the note on step 1 for why "origin v1" drops
+#    the ^{} line you need to check here.)
+git ls-remote --tags origin   # the ^{} line for refs/tags/v1 must now show $NEW_SHA
 gh api repos/agentcontextdistributionprotocol/acdp-ci/git/ref/tags/v1 -q '.object.sha'
 # ^ returns the new TAG-OBJECT sha, which differs from $NEW_SHA — expected for an annotated
 #   tag. Always compare the peeled ^{} line, or you will wrongly conclude the push failed.
@@ -239,8 +253,20 @@ gh api repos/agentcontextdistributionprotocol/acdp-ci/git/ref/tags/v1 -q '.objec
 # NOTE: if the v* tag ruleset (below) is active, this step moves v1 BACKWARDS and is therefore
 # NOT a fast-forward — non_fast_forward on the ruleset requires the bypass actor here even
 # though step 4's forward move satisfied non_fast_forward on its own.
-git push origin "+$OLD_V1_TAG_OBJ:refs/tags/v1"
-git ls-remote --tags origin v1   # ^{} must show $OLD_V1_COMMIT again
+# GUARD — an empty OLD_V1_TAG_OBJ turns the refspec below into "+:refs/tags/v1", which
+# DELETES v1 instead of restoring it. Never skip this check, even under pressure.
+if [ -z "$OLD_V1_TAG_OBJ" ]; then
+  echo "OLD_V1_TAG_OBJ is empty — STOP, re-derive it from step 1's output before rolling back" >&2
+  return 1 2>/dev/null || exit 1
+fi
+# BRACE THE VARIABLE — in zsh (macOS's default shell), an unbraced "$VAR:refs/..."
+# parses ":r" as the history-style "root" modifier and silently eats it, turning
+# this into "+<sha>efs/tags/v1" — not a syntax error, just the wrong ref, and git
+# rejects it with a confusing "src refspec ... does not match any". Confirmed via
+# `zsh -c`. ${OLD_V1_TAG_OBJ} (braced) is unambiguous in both bash and zsh — do not
+# "simplify" this back to the unbraced form.
+git push origin "+${OLD_V1_TAG_OBJ}:refs/tags/v1"
+git ls-remote --tags origin   # the ^{} line for refs/tags/v1 must show $OLD_V1_COMMIT again
 ```
 
 **Not recoverable by rollback:** any consumer run that had already *started* resolved the new
@@ -313,6 +339,8 @@ automatic, audit-logged bypass; rollback is one DELETE.
 | acdp-verifier-py | Python | own ci | add | pip+ga | — | — | independent |
 | acdp-ui-console | TS | own ci | add | npm+ga | — | Vercel | leaf |
 | acdp-website | MDX | own ci | add | npm+ga | — | Vercel | leaf |
+| acdp-ci | YAML/bash | n/a — `workflow_call`/composite only, zero check-runs on its own PRs | ❌ (protection-only, see `standardize.sh`) | ga (2 dirs: root + `actions/checkout-spec`) | — | — | **infra — this is the hub; every repo above consumes it at `@v1`** |
+| `.github` | — | n/a — no `.github/workflows/` at all | ❌ (protection-only, see `standardize.sh`) | — | — | — | org profile + community health files |
 
 ## Extending to new SDKs (Java / Go / Kotlin)
 

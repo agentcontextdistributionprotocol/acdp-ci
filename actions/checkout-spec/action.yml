@@ -40,14 +40,27 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Validate the pin
+    - name: Validate inputs
       shell: bash
       env:
         REF: ${{ inputs.ref }}
+        SET_ENV: ${{ inputs.set-env }}
+        REQUIRE_CONFORMANCE: ${{ inputs.require-conformance }}
       run: |
         set -euo pipefail
         if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
           echo "::error::checkout-spec: ref '$REF' is not a 40-character lowercase hex SHA. Pin the spec to an exact commit — a branch, tag, or short SHA is not accepted, so a spec-repo push can never change this job's result without a commit here." >&2
+          exit 1
+        fi
+        for pair in "set-env:$SET_ENV" "require-conformance:$REQUIRE_CONFORMANCE"; do
+          name="${pair%%:*}" value="${pair#*:}"
+          if [ "$value" != 'true' ] && [ "$value" != 'false' ]; then
+            echo "::error::checkout-spec: $name is '$value', not 'true' or 'false'. Non-canonical values are silently treated as false by this action's shell comparisons — reject rather than risk a silent skip." >&2
+            exit 1
+          fi
+        done
+        if [ "$REQUIRE_CONFORMANCE" = 'true' ] && [ "$SET_ENV" != 'true' ]; then
+          echo "::error::checkout-spec: require-conformance is true but set-env is false — ACDP_REQUIRE_CONFORMANCE would be exported without ACDP_SPEC_DIR, which family consumers (e.g. acdp-rs) treat as a hard failure. Set both or neither." >&2
           exit 1
         fi
 
@@ -73,10 +86,6 @@ runs:
         ACTUAL=$(git -C "$CO_PATH" rev-parse HEAD)
         if [ "$ACTUAL" != "$REF" ]; then
           echo "::error::checkout-spec: checked-out HEAD ($ACTUAL) does not match the pinned ref ($REF). Refusing to proceed." >&2
-          exit 1
-        fi
-        if [ "$REQUIRE_CONFORMANCE" = 'true' ] && [ "$SET_ENV" != 'true' ]; then
-          echo "::error::checkout-spec: require-conformance is true but set-env is false — ACDP_REQUIRE_CONFORMANCE would be exported without ACDP_SPEC_DIR, which family consumers (e.g. acdp-rs) treat as a hard failure. Set both or neither." >&2
           exit 1
         fi
         ABS_PATH="$GITHUB_WORKSPACE/$CO_PATH"
