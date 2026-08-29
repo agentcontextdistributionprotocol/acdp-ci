@@ -7,6 +7,13 @@ name: bump-spec-ref
 # the PR's own CI re-runs conformance against the new fixtures so the reviewer
 # sees whether this repo still conforms.
 #
+# Understands two pin shapes, whichever appears first in the file:
+#   - inline:            a `repository: <spec>` line, then a `ref:` line
+#                         (acdp-rs's ci.yml today)
+#   - checkout-spec:      a `uses: …/acdp-ci/actions/checkout-spec@…` step,
+#                         then a `ref:` line in its `with:` block
+# If neither is found, the job fails loudly instead of opening an empty PR.
+#
 # Auth: the acdp-deps-bot App (org secrets ACDP_BOT_APP_ID / ACDP_BOT_PRIVATE_KEY).
 
 on:
@@ -54,7 +61,11 @@ jobs:
           set -euo pipefail
           SHA="${EVSHA:-$INSHA}"
           [ -n "$SHA" ] || SHA=$(gh api "repos/$SPEC/commits/HEAD" --jq .sha)
-          CUR=$(awk -v s="$SPEC" 'index($0,"repository: "s){f=1} f&&match($0,/[0-9a-f]{40}/){print substr($0,RSTART,RLENGTH);exit}' "$FILE")
+          CUR=$(awk -v s="$SPEC" '(index($0,"repository: "s) || index($0,"acdp-ci/actions/checkout-spec@")){f=1;next} f&&match($0,/[0-9a-f]{40}/){print substr($0,RSTART,RLENGTH);exit}' "$FILE")
+          if [ -z "$CUR" ]; then
+            echo "::error file=$FILE::bump-spec-ref: no pinned spec ref found in $FILE (looked for a 'repository: $SPEC' line or an 'acdp-ci/actions/checkout-spec@' step, each followed by a 'ref:' line)." >&2
+            exit 1
+          fi
           echo "sha=$SHA"                  >> "$GITHUB_OUTPUT"
           echo "short=${SHA:0:7}"          >> "$GITHUB_OUTPUT"
           echo "cur=$CUR"                  >> "$GITHUB_OUTPUT"
@@ -78,11 +89,23 @@ jobs:
           FILE: ${{ inputs.file }}
         run: |
           set -euo pipefail
-          # Replace only the ref: that follows the spec-repo checkout line.
+          # Replace only the ref: that follows either the inline spec-repo checkout
+          # (`repository: <spec>` … `ref:`) or a checkout-spec composite-action step
+          # (`uses: …/checkout-spec@…` … `ref:`) — whichever appears first in the file.
+          # The `\S+` after `checkout-spec\@` consumes the action's own `@v1`/`@<sha>`
+          # pin, so it can never be mistaken for the spec's ref even if the action
+          # itself is SHA-pinned.
           SPEC="$SPEC" SHA="$SHA" perl -0777 -i -pe '
             my $spec = quotemeta($ENV{SPEC}); my $sha = $ENV{SHA};
-            s/(repository:\s*$spec.*?ref:\s*)[0-9a-f]{7,40}/$1$sha/s;
+            s{((?:repository:\s*$spec|acdp-ci/actions/checkout-spec\@\S+).*?\bref:\s*)[0-9a-f]{7,40}}{$1$sha}s;
           ' "$FILE"
+          # Assert the rewrite actually landed — converts a silent no-op (leading to a
+          # cryptic "nothing to commit" death below) into a named failure here.
+          NEW=$(awk -v s="$SPEC" '(index($0,"repository: "s) || index($0,"acdp-ci/actions/checkout-spec@")){f=1;next} f&&match($0,/[0-9a-f]{40}/){print substr($0,RSTART,RLENGTH);exit}' "$FILE")
+          if [ "$NEW" != "$SHA" ]; then
+            echo "::error file=$FILE::bump-spec-ref: rewrite did not land — expected ref $SHA, found '${NEW:-<none>}' in $FILE after rewriting." >&2
+            exit 1
+          fi
 
       - name: Open PR (held for review — never auto-merged)
         if: ${{ steps.v.outputs.changed == 'true' && steps.br.outputs.exists == 'false' }}
