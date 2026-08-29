@@ -44,3 +44,26 @@
   hard failure. Fixed same-session: `action.yml`'s verify step now refuses
   that combination with a clear `::error::` before exporting anything.
 - **Status:** CONFIRMED (2026-08-28) — see DECISIONS.md.
+
+## CI-4's acceptance bar: "sweep confirms no violations" vs. "sweep documents violations found"
+- **Plan:** plans/ci-wave-t4t5-provenance-npm-alias-automerge-scoping.md
+- **Assumed:** the item's literal acceptance criterion — "a repo-sweep confirms
+  no remaining aliased family deps" — can be read as requiring zero violations
+  post-merge.
+- **Chose:** treat the local (acdp-ci) acceptance bar as "the rule is
+  documented, and the sweep's findings — including any violations — are
+  recorded and tracked via an issue," not "zero violations exist." The sweep
+  found one live violation (`acdp-control-plane/package.json:35`); fixing it
+  requires renaming import sites across that repo's own source, a cross-repo
+  code edit out of scope for an `acdp-ci`-only PR. Filed as
+  `agentcontextdistributionprotocol/acdp-control-plane#123` plus
+  `plans/cross-repo/acdp-control-plane-dealias-acdp.md` instead of silently
+  redefining "pass" or blocking this PR on someone else's repo.
+- **Alternatives:** hold this whole PR until `acdp-control-plane` de-aliases —
+  rejected, makes an unrelated repo's migration a blocker for CI-3/CI-6/CI-7
+  too, since this plan ships as one PR.
+- **Blast radius if wrong:** low and one-directional — if the true intent was
+  "block until zero violations," the fix is just holding the PR later; no code
+  written under this assumption needs to change, only the merge timing.
+- **Status:** UNCONFIRMED — proposed default already applied in Phase 2's
+  implementation; flagged for `/reconcile` at end of plan.
