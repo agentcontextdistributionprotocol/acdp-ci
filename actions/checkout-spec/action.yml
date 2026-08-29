@@ -1,0 +1,86 @@
+name: checkout-spec
+description: >-
+  Check out the ACDP spec repo at a SHA-verified pinned ref, and export it to
+  the caller's job as both an env var and a step output. See README.md in
+  this directory for the consumption forms and the ordering rule.
+
+inputs:
+  ref:
+    description: 'Pinned spec commit. Must be a 40-character lowercase hex SHA — anything else is a hard error.'
+    required: true
+  repository:
+    description: 'Spec repo to check out.'
+    required: false
+    default: agentcontextdistributionprotocol/agentcontextdistributionprotocol
+  path:
+    description: 'Checkout path, relative to the workspace.'
+    required: false
+    default: acdp-spec
+  fetch-depth:
+    description: 'Passed through to actions/checkout. Use 0 if ref is unreachable from any ref at depth 1.'
+    required: false
+    default: '1'
+  set-env:
+    description: 'Export ACDP_SPEC_DIR to $GITHUB_ENV.'
+    required: false
+    default: 'true'
+  require-conformance:
+    description: 'Export ACDP_REQUIRE_CONFORMANCE=1 to $GITHUB_ENV.'
+    required: false
+    default: 'true'
+
+outputs:
+  path:
+    description: 'Absolute path to the checkout — for consumers that take a CLI flag rather than reading the env var.'
+    value: ${{ steps.verify.outputs.path }}
+  ref:
+    description: 'The verified SHA, for pasting into evidence blocks.'
+    value: ${{ steps.verify.outputs.ref }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate the pin
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+      run: |
+        set -euo pipefail
+        if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::checkout-spec: ref '$REF' is not a 40-character lowercase hex SHA. Pin the spec to an exact commit — a branch, tag, or short SHA is not accepted, so a spec-repo push can never change this job's result without a commit here." >&2
+          exit 1
+        fi
+
+    - name: Checkout spec at pinned ref
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repository }}
+        ref: ${{ inputs.ref }}
+        path: ${{ inputs.path }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        persist-credentials: false
+
+    - name: Verify and export
+      id: verify
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+        CO_PATH: ${{ inputs.path }}
+        SET_ENV: ${{ inputs.set-env }}
+        REQUIRE_CONFORMANCE: ${{ inputs.require-conformance }}
+      run: |
+        set -euo pipefail
+        ACTUAL=$(git -C "$CO_PATH" rev-parse HEAD)
+        if [ "$ACTUAL" != "$REF" ]; then
+          echo "::error::checkout-spec: checked-out HEAD ($ACTUAL) does not match the pinned ref ($REF). Refusing to proceed." >&2
+          exit 1
+        fi
+        ABS_PATH="$GITHUB_WORKSPACE/$CO_PATH"
+        if [ "$SET_ENV" = 'true' ]; then
+          echo "ACDP_SPEC_DIR=$ABS_PATH" >> "$GITHUB_ENV"
+        fi
+        if [ "$REQUIRE_CONFORMANCE" = 'true' ]; then
+          echo "ACDP_REQUIRE_CONFORMANCE=1" >> "$GITHUB_ENV"
+        fi
+        echo "path=$ABS_PATH" >> "$GITHUB_OUTPUT"
+        echo "ref=$ACTUAL" >> "$GITHUB_OUTPUT"
