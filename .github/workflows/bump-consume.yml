@@ -203,5 +203,20 @@ jobs:
             --title "chore(deps): bump acdp to $T" \
             --body "Event-driven bump of \`acdp\` $CUR → $T, dispatched on publish.$NOTE"
           if [ "$ALLOW_MAJOR" = "true" ] || [ "$BREAKING" = "false" ]; then
-            gh pr merge --auto --squash "$BR"
+            # Same guard as auto-merge.yml (CI-6): refuse to arm GitHub's native
+            # auto-merge on a branch with no required status checks configured —
+            # it merges effectively instantly with nothing to wait for. The PR
+            # still opens either way; only the unattended-merge is withheld.
+            CHECKS_OK=false
+            branch_info="$(gh api "repos/${{ github.repository }}/branches/$GITHUB_REF_NAME" 2>/dev/null || echo '')"
+            if [ -n "$branch_info" ]; then
+              protected="$(echo "$branch_info" | jq -r '.protected')"
+              contexts_count="$(echo "$branch_info" | jq '.protection.required_status_checks.contexts | length? // 0')"
+              [ "$protected" = "true" ] && [ "$contexts_count" -gt 0 ] && CHECKS_OK=true
+            fi
+            if [ "$CHECKS_OK" = "true" ]; then
+              gh pr merge --auto --squash "$BR"
+            else
+              echo "::warning::$GITHUB_REF_NAME has no required status checks configured — auto-merge NOT armed on this bump PR ($BR). Run scripts/standardize.sh against this repo, then merge that PR manually or re-run once adopted."
+            fi
           fi

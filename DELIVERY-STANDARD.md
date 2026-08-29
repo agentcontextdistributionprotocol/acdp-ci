@@ -88,7 +88,7 @@ alias specifier (e.g. `"acdp": "npm:@agentcontextdistributionprotocol/acdp@^0.8.
 
 **Why (verified, not the originally-hypothesized reason)**: `bump-consume.yml`'s
 own npm rewrite loop already handles an aliased entry correctly — its `else if`
-branch (`bump-consume.yml:148`) matches `d[k].startsWith("npm:"+pkg+"@")`
+branch (`bump-consume.yml:157`) matches `d[k].startsWith("npm:"+pkg+"@")`
 against **every** key in the dependency section, not just `k===pkg`, so the fast
 dispatch path rewrites an alias's value regardless of what its own key is named.
 The actual risk is the *safety net*: Dependabot's weekly sweep — which exists
@@ -174,10 +174,10 @@ jobs:
     uses: agentcontextdistributionprotocol/acdp-ci/.github/workflows/bump-spec-ref.yml@v1
     with:
       file: .github/workflows/ci.yml   # the file holding your checkout-spec step
-      sha: ${{ github.event.inputs.sha }}
+      sha: '${{ github.event.inputs.sha }}'
     secrets:
-      ACDP_BOT_APP_ID: ${{ secrets.ACDP_BOT_APP_ID }}
-      ACDP_BOT_PRIVATE_KEY: ${{ secrets.ACDP_BOT_PRIVATE_KEY }}
+      ACDP_BOT_APP_ID: '${{ secrets.ACDP_BOT_APP_ID }}'
+      ACDP_BOT_PRIVATE_KEY: '${{ secrets.ACDP_BOT_PRIVATE_KEY }}'
 ```
 
 **Ordering.** `actions/checkout` cleans its destination. Your own repo's
@@ -226,15 +226,24 @@ The jobs satisfying this bar are the **required status checks** on `main`
 (configured by `scripts/standardize.sh`), so a red gate blocks the merge and
 auto-merge never overrides it. acdp-rs exceeds this baseline. New SDK repos
 (Java / Go / Kotlin) inherit the bar, satisfied by their own ecosystem's tools.
-**One current exception**: `acdp-control-plane` doesn't yet meet the no-alias
-row above — tracked as
-[acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123),
-not silently compliant. Every other repo in the Repo matrix meets this
-baseline in full.
 
-`auto-merge.yml` now enforces this baseline itself: it hard-fails (rather than
-silently completing) on a repo whose `main` hasn't yet adopted `standardize.sh`
-branch protection with at least one required status check.
+This bar applies to every repo that ships code — see the Repo matrix below.
+`acdp-ci` and `.github` are structurally exempt, not exceptions: neither ships
+application code (`acdp-ci` is CI/CD YAML + docs with zero check-runs on its
+own PRs; `.github` has no `.github/workflows/` at all), so `standardize.sh`
+manages them protection-only, with no required checks to configure.
+**One real, tracked exception among the code-shipping repos**:
+`acdp-control-plane` doesn't yet meet the no-alias row above — tracked as
+[acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123),
+not silently compliant. Every other code-shipping repo meets this baseline in
+full.
+
+`auto-merge.yml` and `bump-consume.yml` both now enforce this baseline
+themselves: `auto-merge.yml` hard-fails (rather than silently completing) on a
+repo whose `main` hasn't yet adopted `standardize.sh` branch protection with at
+least one required status check, and `bump-consume.yml`'s own auto-merge call
+(bot-authored SDK bump PRs) carries the identical guard — the PR still opens
+either way, only the unattended merge is withheld.
 
 ## Credentials
 
