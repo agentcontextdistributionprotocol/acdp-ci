@@ -80,6 +80,38 @@ Dependabot safety net.
    and arms auto-merge **unless the bump is breaking** (major, or a `0.x` minor).
 3. Missed dispatch → Dependabot's weekly `acdp` group opens the same PR later.
 
+### npm aliases are forbidden for family packages
+
+Family packages (`@agentcontextdistributionprotocol/*`) MUST be declared under
+their real scoped name in a consumer's `package.json` — never behind an npm
+alias specifier (e.g. `"acdp": "npm:@agentcontextdistributionprotocol/acdp@^0.8.1"`).
+
+**Why (verified, not the originally-hypothesized reason)**: `bump-consume.yml`'s
+own npm rewrite loop already handles an aliased entry correctly — its `else if`
+branch (`bump-consume.yml:148`) matches `d[k].startsWith("npm:"+pkg+"@")`
+against **every** key in the dependency section, not just `k===pkg`, so the fast
+dispatch path rewrites an alias's value regardless of what its own key is named.
+The actual risk is the *safety net*: Dependabot's weekly sweep — which exists
+specifically to catch a missed `bump-consume` dispatch — does not reliably
+follow `npm:` alias specifiers, so an aliased family dependency can silently
+desync whenever the fast path is missed and only the safety net fires. This is
+what actually broke `acdp-control-plane`'s CP-1 (commit `ffb3a99`): the fix
+collapsed a stale-vs-fresh duplicate down to the alias, not away from it,
+leaving the repo still exposed to the same recurrence. Forbidding the alias
+pattern removes the one path (Dependabot) that doesn't handle it correctly,
+which is strictly cheaper than teaching Dependabot's alias handling (not
+`acdp-ci`'s to configure) or adding a second alias-resolution code path.
+
+A one-time, read-only sweep of every npm-consuming sibling repo
+(`acdp-ui-console`, `acdp-website`, `acdp-control-plane`) is recorded in
+`PROGRESS.md`'s "npm-alias sweep (Phase 2, CI-4)" section —
+`acdp-control-plane` still has this violation as its sole declaration of the
+family SDK, tracked via a filed issue and
+`plans/cross-repo/acdp-control-plane-dealias-acdp.md`, not fixed from here.
+This rule is a standing statement of intent, not an enforced CI gate — nothing
+here catches a *new* alias added after this rule ships (see Long-term posture
+in the CI-4 plan).
+
 ### Spec propagation (a new spec revision → its SHA-pinners)
 
 The spec (`agentcontextdistributionprotocol`) is a **dependency pinned by git
@@ -181,6 +213,12 @@ Ships a container image → additionally:
 - [ ] **Boot / smoke before publish** — boot the built image (or run a
       golden-vector / conformance smoke) so an unbootable artifact never reaches
       the registry or a deploy
+
+Consumes a family package via npm → additionally:
+
+- [ ] **No `npm:` alias for family packages** in `package.json` — see
+      [npm aliases are forbidden for family packages](#npm-aliases-are-forbidden-for-family-packages)
+      above.
 
 The jobs satisfying this bar are the **required status checks** on `main`
 (configured by `scripts/standardize.sh`), so a red gate blocks the merge and
