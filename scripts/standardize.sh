@@ -38,6 +38,10 @@
 set -euo pipefail
 
 ORG=agentcontextdistributionprotocol
+# Word-split unquoted below (`for repo in $repos`) under default globbing — every
+# name here must stay free of whitespace and glob metacharacters. `.github`'s
+# leading dot is not one (no unquoted glob expands it), but this is a property of
+# the specific names, not something the script enforces.
 ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol acdp-ci .github"
 
 # Emits one required check-name per line for the given repo (non-zero if unknown).
