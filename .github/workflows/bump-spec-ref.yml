@@ -22,6 +22,11 @@ name: bump-spec-ref
 
 on:
   workflow_call:
+    secrets:
+      ACDP_BOT_APP_ID:
+        required: true
+      ACDP_BOT_PRIVATE_KEY:
+        required: true
     inputs:
       file:
         description: 'Workflow file holding the pinned spec ref'
@@ -41,6 +46,7 @@ on:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Mint GitHub App token
         id: app
@@ -48,6 +54,9 @@ jobs:
         with:
           app-id: ${{ secrets.ACDP_BOT_APP_ID }}
           private-key: ${{ secrets.ACDP_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
 
       - uses: actions/checkout@v7
         with:

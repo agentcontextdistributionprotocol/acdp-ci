@@ -175,7 +175,9 @@ jobs:
     with:
       file: .github/workflows/ci.yml   # the file holding your checkout-spec step
       sha: ${{ github.event.inputs.sha }}
-    secrets: inherit
+    secrets:
+      ACDP_BOT_APP_ID: ${{ secrets.ACDP_BOT_APP_ID }}
+      ACDP_BOT_PRIVATE_KEY: ${{ secrets.ACDP_BOT_PRIVATE_KEY }}
 ```
 
 **Ordering.** `actions/checkout` cleans its destination. Your own repo's
@@ -247,7 +249,13 @@ App repository permissions:
 | **Workflows: Read/write** | **required** for `bump-spec-ref` — the spec pin lives in `.github/workflows/ci.yml`, and GitHub blocks an App from pushing changes under `.github/workflows/` without it |
 
 `bump-consume` (manifests/lockfiles) does not need Workflows; only spec-pin
-propagation does.
+propagation does — enforced, not merely asserted: `bump-consume.yml`'s
+token-mint step requests only `permission-contents: write` and
+`permission-pull-requests: write` from `actions/create-github-app-token`, with
+no `permission-workflows` input at all, so the token it mints can never carry
+Workflows scope, no matter what the App's org-wide installation grants.
+`bump-spec-ref.yml`'s token-mint step is the only one that additionally
+requests `permission-workflows: write`.
 
 **The `acdp-deps-bot` App's `Workflows: Read/write` is org-wide** — it can push to
 `.github/workflows/**` in every repo it's installed in, `acdp-ci` included. That

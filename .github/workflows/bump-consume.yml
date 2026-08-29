@@ -18,10 +18,17 @@ name: bump-consume
 #     bump:
 #       uses: agentcontextdistributionprotocol/acdp-ci/.github/workflows/bump-consume.yml@v1
 #       with:  { ecosystem: npm, package: '@agentcontextdistributionprotocol/acdp' }
-#       secrets: inherit
+#       secrets:
+#         ACDP_BOT_APP_ID: '${{ secrets.ACDP_BOT_APP_ID }}'
+#         ACDP_BOT_PRIVATE_KEY: '${{ secrets.ACDP_BOT_PRIVATE_KEY }}'
 
 on:
   workflow_call:
+    secrets:
+      ACDP_BOT_APP_ID:
+        required: true
+      ACDP_BOT_PRIVATE_KEY:
+        required: true
     inputs:
       ecosystem:
         description: 'npm | cargo | uv'
@@ -46,6 +53,7 @@ on:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Mint GitHub App token
         id: app
@@ -53,6 +61,8 @@ jobs:
         with:
           app-id: ${{ secrets.ACDP_BOT_APP_ID }}
           private-key: ${{ secrets.ACDP_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - uses: actions/checkout@v7
         with:

@@ -47,7 +47,9 @@ jobs:
   bump:
     uses: agentcontextdistributionprotocol/acdp-ci/.github/workflows/bump-consume.yml@v1
     with:  { ecosystem: npm, package: '@agentcontextdistributionprotocol/acdp' }  # cargo|uv per repo
-    secrets: inherit
+    secrets:
+      ACDP_BOT_APP_ID: '${{ secrets.ACDP_BOT_APP_ID }}'
+      ACDP_BOT_PRIVATE_KEY: '${{ secrets.ACDP_BOT_PRIVATE_KEY }}'
 ```
 
 `bump-spec` (spec-pinning consumers only) — commit `.github/workflows/bump-spec.yml`:
@@ -61,7 +63,9 @@ jobs:
   bump:
     uses: agentcontextdistributionprotocol/acdp-ci/.github/workflows/bump-spec-ref.yml@v1
     with:  { file: .github/workflows/ci.yml, sha: '${{ github.event.inputs.sha }}' }
-    secrets: inherit
+    secrets:
+      ACDP_BOT_APP_ID: '${{ secrets.ACDP_BOT_APP_ID }}'
+      ACDP_BOT_PRIVATE_KEY: '${{ secrets.ACDP_BOT_PRIVATE_KEY }}'
 ```
 
 `checkout-spec` (spec-pinning consumers only) — a step inside your own CI job, **after** your
