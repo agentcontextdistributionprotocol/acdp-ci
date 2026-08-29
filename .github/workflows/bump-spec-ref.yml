@@ -76,7 +76,7 @@ jobs:
           # first match). Reject rather than half-bump.
           ANCHOR_COUNT=$(awk -v s="$SPEC" '(index($0,"repository: "s) || index($0,"acdp-ci/actions/checkout-spec@")){c++} END{print c+0}' "$FILE")
           if [ "$ANCHOR_COUNT" -gt 1 ]; then
-            echo "::error file=$FILE::bump-spec-ref: found $ANCHOR_COUNT spec-pin anchors in $FILE — this workflow only rewrites the first and would silently leave the rest stale. Not supported today; bump the others by hand in the same PR." >&2
+            echo "::error file=$FILE::bump-spec-ref: found $ANCHOR_COUNT spec-pin anchors in $FILE — this workflow only rewrites the first and would silently leave the rest stale. Not supported today; bump the others by hand in the same PR. (If this is really only ONE checkout-spec step, an explicit 'repository:' override in its 'with:' block also counts as an anchor and can trigger this on a single step — drop the override to use the action's default, or bump this file by hand.)" >&2
             exit 1
           fi
           echo "sha=$SHA"                  >> "$GITHUB_OUTPUT"
