@@ -65,7 +65,7 @@ runs:
         fi
 
     - name: Checkout spec at pinned ref
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
