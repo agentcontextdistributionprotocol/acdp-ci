@@ -15,6 +15,27 @@ tag-triggered workflows, each with its own registry credential:
 | `@agentcontextdistributionprotocol/acdp` (NAPI) | `bindings-release.yml` | tag `acdp-node-v*` | npm | `NPM_TOKEN` |
 | `acdp` wheels | `acdp-py-release.yml` | tag `acdp-py-v*` | PyPI | OIDC (no token) |
 
+### Provenance is tag-anchored, not publish-anchored
+
+Binding-release provenance is anchored at the release **tag**, not at the publish
+event itself. Every publish workflow in `acdp-rs` (`release-plz.yml`,
+`bindings-release.yml`, `acdp-py-release.yml`) also accepts `workflow_dispatch`
+for manual/dry-run use, alongside its normal tag trigger. Concretely, in
+`acdp-rs/.github/workflows/bindings-release.yml`, the `on:` block (lines 15-28)
+declares both `push: tags: acdp-node-v*` and `workflow_dispatch`, and the
+latter's `dry_run` input (line 25-28) defaults `true` but can be set `false` by
+an operator to force a real `npm publish` — the publish step's `if:` condition
+is `github.event_name == 'push' || !inputs.dry_run`, so a manual dispatch with
+`dry_run: false` publishes for real with **no tag ever pushed**.
+
+`bump-consume.yml` (in this repo) only *propagates* whatever a registry
+actually serves — it has no way to tell whether the version it's bumping to
+came from a tag-triggered release (reviewable, provenance-anchored to a commit
+via the tag) or a manual `workflow_dispatch` (no tag, no anchor). A
+`workflow_dispatch` publish is for local/dry-run testing only; treating one as
+a real release breaks the provenance chain a consumer's bump PR implicitly
+claims to have.
+
 ## Propagation graph
 
 ```
