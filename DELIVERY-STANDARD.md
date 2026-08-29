@@ -224,9 +224,13 @@ Consumes a family package via npm → additionally:
 
 The jobs satisfying this bar are the **required status checks** on `main`
 (configured by `scripts/standardize.sh`), so a red gate blocks the merge and
-auto-merge never overrides it. All current repos meet this baseline (see the Repo
-matrix); acdp-rs exceeds it. New SDK repos (Java / Go / Kotlin) inherit the bar,
-satisfied by their own ecosystem's tools.
+auto-merge never overrides it. acdp-rs exceeds this baseline. New SDK repos
+(Java / Go / Kotlin) inherit the bar, satisfied by their own ecosystem's tools.
+**One current exception**: `acdp-control-plane` doesn't yet meet the no-alias
+row above — tracked as
+[acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123),
+not silently compliant. Every other repo in the Repo matrix meets this
+baseline in full.
 
 `auto-merge.yml` now enforces this baseline itself: it hard-fails (rather than
 silently completing) on a repo whose `main` hasn't yet adopted `standardize.sh`

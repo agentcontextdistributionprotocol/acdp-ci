@@ -65,5 +65,4 @@
 - **Blast radius if wrong:** low and one-directional — if the true intent was
   "block until zero violations," the fix is just holding the PR later; no code
   written under this assumption needs to change, only the merge timing.
-- **Status:** UNCONFIRMED — proposed default already applied in Phase 2's
-  implementation; flagged for `/reconcile` at end of plan.
+- **Status:** CONFIRMED (2026-08-29) — see DECISIONS.md.

@@ -76,3 +76,27 @@ recommending agent's analysis, the human's verdict, and the resulting status.
 - **Status:** CONFIRMED. Phase 3 proceeds as designed; `acdp-website`'s
   Dependabot PRs will show a red auto-merge job the next time one runs, with
   no advance notice beyond this record.
+
+## 2026-08-29 — CI-4's acceptance bar: document + track, don't block on cross-repo fix
+
+- **Assumption:** treat the local acceptance criterion as "the rule is
+  documented, and the sweep's findings — including violations — are recorded
+  and tracked," not "zero violations exist post-merge."
+- **Recommendation (Opus subagent):** confirm as-is. Verified against live
+  state (not just the plan's description of it): the alias is still present
+  at `acdp-control-plane/package.json:35`, issue #123 is open and correctly
+  linked both directions, `plans/cross-repo/acdp-control-plane-dealias-acdp.md`
+  has concrete, checkable acceptance criteria a future agent could execute
+  without re-deriving context, and `DELIVERY-STANDARD.md`'s new rule already
+  states the violation is tracked-not-fixed rather than overclaiming
+  compliance. Holding the PR would block CI-3/CI-6/CI-7 on an unrelated repo's
+  source refactor for no compensating benefit. Flagged two real, separate
+  defects: (1) `DELIVERY-STANDARD.md:227`'s "All current repos meet this
+  baseline" contradicted the new rule's own finding; (2) issue #123's links
+  are pinned to the feature branch and will 404 once it's deleted post-merge.
+- **Verdict:** confirm as-is; fix both flagged defects now/at-merge rather
+  than deferring either.
+- **Status:** CONFIRMED. `DELIVERY-STANDARD.md:227` reworded in this PR to
+  name `acdp-control-plane` as the one tracked exception, citing #123.
+  Follow-up (not blocking): repoint issue #123's blob-URL links from this
+  feature branch to `main` immediately after this PR merges.
