@@ -29,8 +29,13 @@
 #              all (verified via the contents API) — same reasoning as acdp-ci.
 # Neither gets allow_auto_merge=true: auto-merge.yml's `gh pr merge --auto` would
 # merge a PR instantly on a branch with no required checks — a hazard, not a
-# convenience, on a zero-check repo (CI-6, Wave 4, is chartered to fix this
-# properly). Both repos are allow_auto_merge:false on GitHub today, so leaving
+# convenience, on a zero-check repo. auto-merge.yml and bump-consume.yml both
+# now carry their own guard against exactly this (CI-6, Wave 4) — refusing to
+# arm auto-merge unless this same script has configured required status checks
+# on the target branch — but leaving allow_auto_merge:false here is still the
+# right call for these two repos specifically, since neither script-managed
+# option even applies (acdp-ci/.github have no CI job to require in the first
+# place). Both repos are allow_auto_merge:false on GitHub today, so leaving
 # auto-merge off here codifies the status quo rather than changing behaviour.
 #
 # Prereqs: gh auth with admin:org. Org secrets (App id/key) are set separately.

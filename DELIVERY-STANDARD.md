@@ -15,6 +15,27 @@ tag-triggered workflows, each with its own registry credential:
 | `@agentcontextdistributionprotocol/acdp` (NAPI) | `bindings-release.yml` | tag `acdp-node-v*` | npm | `NPM_TOKEN` |
 | `acdp` wheels | `acdp-py-release.yml` | tag `acdp-py-v*` | PyPI | OIDC (no token) |
 
+### Provenance is tag-anchored, not publish-anchored
+
+Binding-release provenance is anchored at the release **tag**, not at the publish
+event itself. Every publish workflow in `acdp-rs` (`release-plz.yml`,
+`bindings-release.yml`, `acdp-py-release.yml`) also accepts `workflow_dispatch`
+for manual/dry-run use, alongside its normal tag trigger. Concretely, in
+`acdp-rs/.github/workflows/bindings-release.yml`, the `on:` block (lines 15-28)
+declares both `push: tags: acdp-node-v*` and `workflow_dispatch`, and the
+latter's `dry_run` input (line 25-28) defaults `true` but can be set `false` by
+an operator to force a real `npm publish` — the publish step's `if:` condition
+is `github.event_name == 'push' || !inputs.dry_run`, so a manual dispatch with
+`dry_run: false` publishes for real with **no tag ever pushed**.
+
+`bump-consume.yml` (in this repo) only *propagates* whatever a registry
+actually serves — it has no way to tell whether the version it's bumping to
+came from a tag-triggered release (reviewable, provenance-anchored to a commit
+via the tag) or a manual `workflow_dispatch` (no tag, no anchor). A
+`workflow_dispatch` publish is for local/dry-run testing only; treating one as
+a real release breaks the provenance chain a consumer's bump PR implicitly
+claims to have.
+
 ## Propagation graph
 
 ```
@@ -58,6 +79,38 @@ Dependabot safety net.
    `cargo update --precise`; `uv` runs `uv lock --upgrade-package`), opens a PR,
    and arms auto-merge **unless the bump is breaking** (major, or a `0.x` minor).
 3. Missed dispatch → Dependabot's weekly `acdp` group opens the same PR later.
+
+### npm aliases are forbidden for family packages
+
+Family packages (`@agentcontextdistributionprotocol/*`) MUST be declared under
+their real scoped name in a consumer's `package.json` — never behind an npm
+alias specifier (e.g. `"acdp": "npm:@agentcontextdistributionprotocol/acdp@^0.8.1"`).
+
+**Why (verified, not the originally-hypothesized reason)**: `bump-consume.yml`'s
+own npm rewrite loop already handles an aliased entry correctly — its `else if`
+branch (`bump-consume.yml:157`) matches `d[k].startsWith("npm:"+pkg+"@")`
+against **every** key in the dependency section, not just `k===pkg`, so the fast
+dispatch path rewrites an alias's value regardless of what its own key is named.
+The actual risk is the *safety net*: Dependabot's weekly sweep — which exists
+specifically to catch a missed `bump-consume` dispatch — does not reliably
+follow `npm:` alias specifiers, so an aliased family dependency can silently
+desync whenever the fast path is missed and only the safety net fires. This is
+what actually broke `acdp-control-plane`'s CP-1 (commit `ffb3a99`): the fix
+collapsed a stale-vs-fresh duplicate down to the alias, not away from it,
+leaving the repo still exposed to the same recurrence. Forbidding the alias
+pattern removes the one path (Dependabot) that doesn't handle it correctly,
+which is strictly cheaper than teaching Dependabot's alias handling (not
+`acdp-ci`'s to configure) or adding a second alias-resolution code path.
+
+A one-time, read-only sweep of every npm-consuming sibling repo
+(`acdp-ui-console`, `acdp-website`, `acdp-control-plane`) is recorded in
+`PROGRESS.md`'s "npm-alias sweep (Phase 2, CI-4)" section —
+`acdp-control-plane` still has this violation as its sole declaration of the
+family SDK, tracked via a filed issue and
+`plans/cross-repo/acdp-control-plane-dealias-acdp.md`, not fixed from here.
+This rule is a standing statement of intent, not an enforced CI gate — nothing
+here catches a *new* alias added after this rule ships (see Long-term posture
+in the CI-4 plan).
 
 ### Spec propagation (a new spec revision → its SHA-pinners)
 
@@ -121,8 +174,10 @@ jobs:
     uses: agentcontextdistributionprotocol/acdp-ci/.github/workflows/bump-spec-ref.yml@v1
     with:
       file: .github/workflows/ci.yml   # the file holding your checkout-spec step
-      sha: ${{ github.event.inputs.sha }}
-    secrets: inherit
+      sha: '${{ github.event.inputs.sha }}'
+    secrets:
+      ACDP_BOT_APP_ID: '${{ secrets.ACDP_BOT_APP_ID }}'
+      ACDP_BOT_PRIVATE_KEY: '${{ secrets.ACDP_BOT_PRIVATE_KEY }}'
 ```
 
 **Ordering.** `actions/checkout` cleans its destination. Your own repo's
@@ -161,11 +216,34 @@ Ships a container image → additionally:
       golden-vector / conformance smoke) so an unbootable artifact never reaches
       the registry or a deploy
 
+Consumes a family package via npm → additionally:
+
+- [ ] **No `npm:` alias for family packages** in `package.json` — see
+      [npm aliases are forbidden for family packages](#npm-aliases-are-forbidden-for-family-packages)
+      above.
+
 The jobs satisfying this bar are the **required status checks** on `main`
 (configured by `scripts/standardize.sh`), so a red gate blocks the merge and
-auto-merge never overrides it. All current repos meet this baseline (see the Repo
-matrix); acdp-rs exceeds it. New SDK repos (Java / Go / Kotlin) inherit the bar,
-satisfied by their own ecosystem's tools.
+auto-merge never overrides it. acdp-rs exceeds this baseline. New SDK repos
+(Java / Go / Kotlin) inherit the bar, satisfied by their own ecosystem's tools.
+
+This bar applies to every repo that ships code — see the Repo matrix below.
+`acdp-ci` and `.github` are structurally exempt, not exceptions: neither ships
+application code (`acdp-ci` is CI/CD YAML + docs with zero check-runs on its
+own PRs; `.github` has no `.github/workflows/` at all), so `standardize.sh`
+manages them protection-only, with no required checks to configure.
+**One real, tracked exception among the code-shipping repos**:
+`acdp-control-plane` doesn't yet meet the no-alias row above — tracked as
+[acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123),
+not silently compliant. Every other code-shipping repo meets this baseline in
+full.
+
+`auto-merge.yml` and `bump-consume.yml` both now enforce this baseline
+themselves: `auto-merge.yml` hard-fails (rather than silently completing) on a
+repo whose `main` hasn't yet adopted `standardize.sh` branch protection with at
+least one required status check, and `bump-consume.yml`'s own auto-merge call
+(bot-authored SDK bump PRs) carries the identical guard — the PR still opens
+either way, only the unattended merge is withheld.
 
 ## Credentials
 
@@ -184,7 +262,13 @@ App repository permissions:
 | **Workflows: Read/write** | **required** for `bump-spec-ref` — the spec pin lives in `.github/workflows/ci.yml`, and GitHub blocks an App from pushing changes under `.github/workflows/` without it |
 
 `bump-consume` (manifests/lockfiles) does not need Workflows; only spec-pin
-propagation does.
+propagation does — enforced, not merely asserted: `bump-consume.yml`'s
+token-mint step requests only `permission-contents: write` and
+`permission-pull-requests: write` from `actions/create-github-app-token`, with
+no `permission-workflows` input at all, so the token it mints can never carry
+Workflows scope, no matter what the App's org-wide installation grants.
+`bump-spec-ref.yml`'s token-mint step is the only one that additionally
+requests `permission-workflows: write`.
 
 **The `acdp-deps-bot` App's `Workflows: Read/write` is org-wide** — it can push to
 `.github/workflows/**` in every repo it's installed in, `acdp-ci` included. That
