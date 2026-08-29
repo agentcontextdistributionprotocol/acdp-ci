@@ -38,6 +38,20 @@ jobs:
         id: meta
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
+      - name: Guard — base branch must require status checks
+        if: ${{ inputs.allow-major || steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor' }}
+        run: |
+          branch="$(gh api "repos/${{ github.repository }}/branches/$BASE_REF")"
+          protected="$(echo "$branch" | jq -r '.protected')"
+          contexts_count="$(echo "$branch" | jq '.protection.required_status_checks.contexts | length? // 0')"
+          if [ "$protected" != "true" ] || [ "$contexts_count" -eq 0 ]; then
+            echo "::error::Base branch '$BASE_REF' has no required status checks configured (protected=$protected). Auto-merge refuses to arm on an ungated branch. Run scripts/standardize.sh against this repo to adopt branch protection with required checks, then retry."
+            exit 1
+          fi
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GH_TOKEN: ${{ github.token }}
+
       - name: Enable auto-merge (patch & minor; majors held)
         if: ${{ inputs.allow-major || steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor' }}
         run: gh pr merge --auto --squash "$PR_URL"

@@ -226,6 +226,10 @@ auto-merge never overrides it. All current repos meet this baseline (see the Rep
 matrix); acdp-rs exceeds it. New SDK repos (Java / Go / Kotlin) inherit the bar,
 satisfied by their own ecosystem's tools.
 
+`auto-merge.yml` now enforces this baseline itself: it hard-fails (rather than
+silently completing) on a repo whose `main` hasn't yet adopted `standardize.sh`
+branch protection with at least one required status check.
+
 ## Credentials
 
 One GitHub App (`acdp-deps-bot`), installed org-wide, key stored once as org

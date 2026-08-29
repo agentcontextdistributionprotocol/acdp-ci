@@ -59,3 +59,20 @@ recommending agent's analysis, the human's verdict, and the resulting status.
   with `directory: /actions/checkout-spec`, same weekly schedule and grouping as the
   existing entry.
 - **Status:** DONE. YAML validated; two update entries confirmed present.
+
+## 2026-08-29 — `acdp-website` will permanently fail Phase 3's (CI-6) auto-merge guard
+
+- **Finding:** surfaced during the plan-review round for
+  `plans/ci-wave-t4t5-provenance-npm-alias-automerge-scoping.md`, not a
+  pre-logged assumption. `acdp-website` is a live caller of `auto-merge.yml`
+  but is structurally excluded from `standardize.sh`'s managed branch
+  protection (private repo; branch protection needs GitHub Pro), so the new
+  required-checks guard (Phase 3) will permanently red-fail its Dependabot
+  auto-merge runs, not just "until adoption completes" like other repos.
+- **Options posed:** (1) ship the guard anyway, accepting the behavior change;
+  (2) ship the guard and file a tracked issue in `acdp-website` flagging it;
+  (3) hold Phase 3 out of this PR until `acdp-website`'s situation is resolved.
+- **Verdict:** ship the guard anyway (option 1). No follow-up issue filed.
+- **Status:** CONFIRMED. Phase 3 proceeds as designed; `acdp-website`'s
+  Dependabot PRs will show a red auto-merge job the next time one runs, with
+  no advance notice beyond this record.
