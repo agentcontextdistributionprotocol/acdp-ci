@@ -75,6 +75,10 @@ runs:
           echo "::error::checkout-spec: checked-out HEAD ($ACTUAL) does not match the pinned ref ($REF). Refusing to proceed." >&2
           exit 1
         fi
+        if [ "$REQUIRE_CONFORMANCE" = 'true' ] && [ "$SET_ENV" != 'true' ]; then
+          echo "::error::checkout-spec: require-conformance is true but set-env is false — ACDP_REQUIRE_CONFORMANCE would be exported without ACDP_SPEC_DIR, which family consumers (e.g. acdp-rs) treat as a hard failure. Set both or neither." >&2
+          exit 1
+        fi
         ABS_PATH="$GITHUB_WORKSPACE/$CO_PATH"
         if [ "$SET_ENV" = 'true' ]; then
           echo "ACDP_SPEC_DIR=$ABS_PATH" >> "$GITHUB_ENV"

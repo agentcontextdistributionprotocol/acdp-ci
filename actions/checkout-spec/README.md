@@ -41,7 +41,7 @@ steps:
 | `path` | `acdp-spec` | Checkout path, relative to the workspace. |
 | `fetch-depth` | `1` | Passed through to `actions/checkout`. Use `0` if `ref` is unreachable from any ref at the default shallow depth (e.g. the spec force-pushed it away). |
 | `set-env` | `true` | Export `ACDP_SPEC_DIR` to `$GITHUB_ENV`. |
-| `require-conformance` | `true` | Export `ACDP_REQUIRE_CONFORMANCE=1` to `$GITHUB_ENV`. |
+| `require-conformance` | `true` | Export `ACDP_REQUIRE_CONFORMANCE=1` to `$GITHUB_ENV`. **Hard error if `true` while `set-env` is `false`** — family consumers (e.g. `acdp-rs`) treat `ACDP_REQUIRE_CONFORMANCE` set without `ACDP_SPEC_DIR` as a failure, so this action refuses to produce that combination. Set both or neither. |
 
 ## Outputs
 

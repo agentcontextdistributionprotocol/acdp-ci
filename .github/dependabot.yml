@@ -7,3 +7,10 @@ updates:
     groups:
       actions:
         patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /actions/checkout-spec
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
