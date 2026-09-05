@@ -507,7 +507,7 @@ automatic, audit-logged bypass; rollback is one DELETE.
 | acdp-verifier-py | Python | own ci | add | pip+ga | — | — | independent |
 | acdp-ui-console | TS | own ci | add | npm+ga | — | Vercel | consumes wasm (Dependabot only, no dispatch — acdp-ui-console#70) |
 | acdp-website | MDX | own ci | add | npm+ga | — | Vercel | leaf |
-| acdp-ci | YAML/bash | n/a — `workflow_call`/composite only, zero check-runs on its own PRs | ❌ (protection-only, see `standardize.sh`) | ga (2 dirs: root + `actions/checkout-spec`) | — | — | **infra — this is the hub; every repo above consumes it at `@v1`** |
+| acdp-ci | YAML/bash | n/a — also has `drift-check.yml` (`schedule`/`workflow_dispatch`) as of CI-8, but zero check-runs on its own PRs still holds | ❌ (protection-only, see `standardize.sh`) | ga (2 dirs: root + `actions/checkout-spec`) | — | — | **infra — this is the hub; every repo above consumes it at `@v1`** |
 | `.github` | — | n/a — no `.github/workflows/` at all | ❌ (protection-only, see `standardize.sh`) | — | — | — | org profile + community health files |
 
 ## Extending to new SDKs (Java / Go / Kotlin)

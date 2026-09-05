@@ -41,6 +41,20 @@
 # both --check and normal apply; finding it means comparing checks_for()
 # against each repo's CI workflow by hand.
 #
+# The set difference is computed BOTH ways, as two distinct code paths:
+#   extras  = live - declared -- a live required check the next PUT would
+#             silently DROP. Blocks apply (unless --allow-check-removal);
+#             in --check, accumulates into DRIFT and the exit code.
+#   missing = declared - live -- a name checks_for() declares that isn't
+#             live yet (typically: checks_for() was edited ahead of the
+#             post-merge apply runbook). This is exactly what the next PUT
+#             is about to ADD, so it must NEVER block apply. In --check
+#             mode only, it is reported with its own "!! PENDING:" marker
+#             and accumulates into a third, separately-tracked condition
+#             (PENDING) that also makes --check's exit code non-zero --
+#             otherwise --check would report "all in sync" while a
+#             declared requirement silently never goes live.
+#
 # --allow-check-removal
 #   Overrides the guard for a single invocation: proceeds with the PUT even
 #   though it would drop a live required check that checks_for() doesn't
@@ -50,16 +64,17 @@
 #
 # --check / --dry-run (synonyms)
 #   Runs the same guard against every named repo (or all managed repos by
-#   default) and reports drift, without making any mutating call. Prints
-#   the live required contexts it read for every surveyed repo — including
-#   repos with no drift — because a permission-degraded read (e.g. a token
-#   missing contents:read) can produce a payload indistinguishable from a
-#   genuinely unprotected branch, and "no drift reported" is also exactly
-#   what a broken token looks like. An unreadable repo is recorded as an
-#   error, distinct from drift, and the sweep continues to the remaining
-#   repos rather than aborting; the exit status reflects whatever
-#   accumulated (drift and/or errors) only after the whole sweep completes.
-#   --check needs only contents:read; apply needs admin.
+#   default) and reports drift and pending-apply status, without making any
+#   mutating call. Prints the live required contexts it read for every
+#   surveyed repo — including repos with no drift — because a permission-
+#   degraded read (e.g. a token missing contents:read) can produce a
+#   payload indistinguishable from a genuinely unprotected branch, and "no
+#   drift reported" is also exactly what a broken token looks like. An
+#   unreadable repo is recorded as an error, distinct from drift and from a
+#   pending-apply, and the sweep continues to the remaining repos rather
+#   than aborting; the exit status reflects whatever accumulated (drift
+#   and/or errors and/or pending-apply) only after the whole sweep
+#   completes. --check needs only contents:read; apply needs admin.
 #
 # Portable to macOS's stock bash 3.2 (no associative arrays).
 #
@@ -68,8 +83,18 @@
 #   acdp-website — private repo; branch protection needs GitHub Pro or public.
 #
 # Protection-only (managed here, but with zero required checks):
-#   acdp-ci  — every workflow is `workflow_call`-only, so the repo produces zero
-#              check-runs on its own PRs; there is nothing to require. Protection
+#   acdp-ci  — as of CI-8 (drift-check.yml), not every workflow here is
+#              `workflow_call`-only any more -- but drift-check.yml triggers
+#              only on `schedule`/`workflow_dispatch`, neither of which ever
+#              runs as a PR-triggered event, and the scheduled run executes
+#              on the default branch only -- so acdp-ci produces no
+#              check-runs from PR events, and its protection-only status
+#              (nothing to require) is unaffected. (A deliberate operator
+#              `workflow_dispatch` run against a PR's head branch does
+#              create check-runs on that head SHA, surfacing in that PR's
+#              checks -- but that's an operator act, not something this
+#              workflow's triggers do on their own, and acdp-ci requires
+#              zero checks regardless.) Protection
 #              still matters here: with enforce_admins:false it doesn't constrain
 #              the solo maintainer, but it does constrain the acdp-deps-bot App
 #              (Contents+Workflows write, org-wide) and Dependabot, neither of
@@ -299,6 +324,7 @@ fi
 
 DRIFT=0
 ERRORS=0
+PENDING=0
 
 for repo in $repos; do
   if ! lines=$(checks_for "$repo"); then
@@ -381,13 +407,67 @@ for repo in $repos; do
     elif [ "$CHECK_MODE" -eq 1 ]; then
       echo "!! DRIFT: $repo: live required check(s) not declared in checks_for() — would be DROPPED by the next PUT: $extras_list"
       DRIFT=1
-      continue
+      # Deliberately NOT `continue` here: --check must still compute and
+      # report `missing` (below) for this same repo before moving on, so a
+      # repo with BOTH extras and missing prints both markers in one pass.
+      # Apply mode never reaches this branch without exiting above (drift
+      # blocks apply unconditionally, same as before this change).
     else
       echo "!! DRIFT: $repo: live required check(s) not declared in checks_for() — would be DROPPED by the next PUT: $extras_list (use --allow-check-removal to override)" >&2
       exit 1
     fi
+    # extras_len > 0: something live either isn't declared (DRIFT, reported
+    # above) or was explicitly allowed via --allow-check-removal — either
+    # way "nothing live would be dropped" is not a true claim, so the
+    # extras-axis message below is suppressed for this repo.
+    extras_clean=0
   else
-    echo "   $repo: required checks in sync (nothing live would be dropped)"
+    extras_clean=1
+  fi
+
+  # --- missing = declared - live: checks_for() lists a name that isn't
+  # live yet (e.g. checks_for() was edited ahead of the post-merge apply
+  # runbook). This is the OPPOSITE axis from extras and must never be
+  # conflated with it: extras is what the next PUT would silently DROP;
+  # missing is what the next PUT is about to ADD. Computed the same way
+  # (jq array subtraction) and with the same fail-closed handling — a jq
+  # failure here is recorded as an error / aborts, never treated as an
+  # empty "nothing missing" result. ---
+  if ! missing=$(jq -nc --argjson live "$live" --argjson want "$contexts_json" '$want - $live'); then
+    echo "!! $repo: could not compute pending-apply status (unexpected JSON)" >&2
+    if [ "$CHECK_MODE" -eq 1 ]; then
+      ERRORS=1
+      continue
+    else
+      exit 1
+    fi
+  fi
+  missing_len=$(printf '%s' "$missing" | jq 'length')
+
+  if [ "$missing_len" -gt 0 ]; then
+    missing_list=$(printf '%s' "$missing" | jq -r 'join(", ")')
+    # A repo can be reported here with a declared-but-not-live check, so
+    # the extras-axis message must not claim "in sync" — that would read
+    # as contradicting the PENDING line below. State only what the extras
+    # check actually verified (nothing live would be dropped), scoped to
+    # that one axis.
+    if [ "$extras_clean" -eq 1 ]; then
+      echo "   $repo: no live check would be dropped"
+    fi
+    # In --check mode ONLY this accumulates into the exit code: it is a
+    # report consumed by the monitor, not a block. In APPLY mode this must
+    # NEVER block — the upcoming PUT is exactly what adds these, so the
+    # message below is informational and PENDING is never set.
+    echo "!! PENDING: $repo: declared but not yet live (run apply): $missing_list"
+    if [ "$CHECK_MODE" -eq 1 ]; then
+      PENDING=1
+    fi
+  else
+    # Nothing extra and nothing missing: the repo genuinely is in sync.
+    if [ "$extras_clean" -eq 1 ]; then
+      echo "   $repo: required checks in sync (nothing live would be dropped)"
+    fi
+    echo "   $repo: nothing pending (every declared check is already live)"
   fi
 
   if [ "$CHECK_MODE" -eq 1 ]; then
@@ -403,11 +483,24 @@ for repo in $repos; do
 done
 
 if [ "$CHECK_MODE" -eq 1 ]; then
-  if [ "$DRIFT" -ne 0 ] || [ "$ERRORS" -ne 0 ]; then
-    echo "--check: drift and/or unreadable repos found (see '!!' lines above)."
+  if [ "$DRIFT" -ne 0 ] || [ "$ERRORS" -ne 0 ] || [ "$PENDING" -ne 0 ]; then
+    # Three independent conditions, tracked separately -- report exactly
+    # which fired instead of a single blended "drift and/or errors" line
+    # that would blur a pending-apply into a drift report (or vice versa).
+    found=""
+    if [ "$DRIFT" -ne 0 ]; then
+      found="${found}drift (a live required check would be dropped); "
+    fi
+    if [ "$ERRORS" -ne 0 ]; then
+      found="${found}unreadable repo(s); "
+    fi
+    if [ "$PENDING" -ne 0 ]; then
+      found="${found}declared-but-not-yet-live check(s) pending an apply; "
+    fi
+    echo "--check: found: ${found}see '!!' lines above."
     exit 1
   fi
-  echo "--check: all repos in sync, nothing would be dropped."
+  echo "--check: all repos in sync -- nothing would be dropped, nothing pending apply."
   exit 0
 fi
 

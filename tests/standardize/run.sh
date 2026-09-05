@@ -580,6 +580,115 @@ else
 fi
 
 echo
+echo "== G1: missing = declared - live (pending-apply reporting) =="
+
+# --- G1a: playground-exact is declared (3, checks_for() now includes
+#     "docker image builds") ⊋ live (2). --check must exit 1 and name the
+#     missing check under its own "!! PENDING:" marker, distinct from
+#     "!! DRIFT:", with zero mutating calls. ---
+FX="$FIXTURES_ROOT/playground-exact"
+LOG="$(new_log)"
+out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check acdp-playground 2>&1)"
+rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "!! PENDING:" && printf '%s' "$out" | grep -q "docker image builds"; then
+  pass "G1a: --check on declared⊋live (playground-exact) exits 1 with PENDING marker naming the missing check"
+else
+  fail "G1a: --check on declared⊋live (playground-exact) exits 1 with PENDING marker naming the missing check" "rc=$rc out=$out"
+fi
+if ! printf '%s' "$out" | grep -q "!! DRIFT:"; then
+  pass "G1a: declared⊋live is reported as PENDING, never as DRIFT (opposite axis)"
+else
+  fail "G1a: declared⊋live is reported as PENDING, never as DRIFT" "rc=$rc out=$out"
+fi
+assert_zero_mutations "$LOG" "G1a: --check on declared⊋live makes zero mutating calls"
+
+# --- G1b: APPLY mode against that SAME fixture must still proceed all the
+#     way to the mutation -- missing never blocks apply, since the PUT
+#     about to run is exactly what adds the missing check. The PUT body
+#     carries checks_for()'s full declared set (all 3), since contexts_json
+#     is always the declared list, never filtered by what's live. ---
+LOG="$(new_log)"
+out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-playground 2>&1)"
+rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "!! PENDING:"; then
+  pass "G1b: apply mode on declared⊋live still exits 0 (missing never blocks), PENDING reported informationally"
+else
+  fail "G1b: apply mode on declared⊋live still exits 0 (missing never blocks)" "rc=$rc out=$out"
+fi
+n_mut="$(count_mutations "$LOG")"
+if [ "$n_mut" -gt 0 ]; then
+  pass "G1b: apply mode on declared⊋live reaches the mutation (missing never blocks the apply)"
+else
+  fail "G1b: apply mode on declared⊋live reaches the mutation" "expected >0 mutating calls in $LOG, found $n_mut"
+fi
+put_body="$(awk '/^gh api -X PUT/{getline; if ($0 ~ /^STDIN: /) { sub(/^STDIN: /, ""); print; exit }}' "$LOG")"
+put_contexts="$(printf '%s' "$put_body" | jq -c '.required_status_checks.contexts // empty' 2>/dev/null)"
+if [ "$put_contexts" = '["pytest + smoke (py3.12)","pytest + smoke (py3.13)","docker image builds"]' ]; then
+  pass "G1b: PUT body carries checks_for()'s full declared set, including the previously-missing check"
+else
+  fail "G1b: PUT body carries checks_for()'s full declared set" "got '$put_contexts'"
+fi
+
+# --- G1c: a clean full sweep (declared == live for every managed repo)
+#     still exits 0 -- regression guard, reusing the same fixtures as the
+#     G4 regression-guard sweep above (already declared == live for every
+#     repo, including acdp-playground's 3 checks and acdp-verifier-py's 4,
+#     so no fixture changes were needed for this fix). Re-run --check here
+#     explicitly asserting no PENDING marker appears anywhere. ---
+CLEAN_SWEEP2_FX="$(mktemp -d)"
+write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
+write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)"
+write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
+write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
+write_insync_fixture "$CLEAN_SWEEP2_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
+write_unprotected_fixture "$CLEAN_SWEEP2_FX" acdp-ci
+write_unprotected_fixture "$CLEAN_SWEEP2_FX" .github
+LOG="$(new_log)"
+out="$(FIXTURES="$CLEAN_SWEEP2_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
+rc=$?
+if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -q "!! PENDING:"; then
+  pass "G1c: clean full sweep (declared == live everywhere) still exits 0, no PENDING marker"
+else
+  fail "G1c: clean full sweep still exits 0, no PENDING marker" "rc=$rc out=$out"
+fi
+assert_zero_mutations "$LOG" "G1c: clean full sweep --check makes zero mutating calls"
+rm -rf "$CLEAN_SWEEP2_FX"
+
+# --- G1d: drift (extras) AND missing together on the SAME repo -> exit 1,
+#     BOTH markers appear. Scratch fixture based on registry-rs-insync:
+#     live swaps "conformance (spec fixtures)" for an undeclared "nightly
+#     fuzz (spec fixtures)" -- so live has one check checks_for() doesn't
+#     declare (extras) AND is missing one checks_for() does declare
+#     (missing), in the same repo, same run. ---
+SCRATCH_BOTH="$(mktemp -d)"
+cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" "$SCRATCH_BOTH/"
+jq '.protection.required_status_checks.contexts = ["rustfmt","clippy","tests","nightly fuzz (spec fixtures)"]
+    | .protection.required_status_checks.checks = [
+        {"context":"rustfmt","app_id":15368},
+        {"context":"clippy","app_id":15368},
+        {"context":"tests","app_id":15368},
+        {"context":"nightly fuzz (spec fixtures)","app_id":15368}
+      ]' \
+  "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main.json" \
+  > "$SCRATCH_BOTH/repos_${ORG}_acdp-registry-rs_branches_main.json"
+
+LOG="$(new_log)"
+out="$(FIXTURES="$SCRATCH_BOTH" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check acdp-registry-rs 2>&1)"
+rc=$?
+if [ "$rc" -eq 1 ] \
+   && printf '%s' "$out" | grep -q "!! DRIFT:" \
+   && printf '%s' "$out" | grep -q "nightly fuzz (spec fixtures)" \
+   && printf '%s' "$out" | grep -q "!! PENDING:" \
+   && printf '%s' "$out" | grep -q "conformance (spec fixtures)"; then
+  pass "G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear"
+else
+  fail "G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear" "rc=$rc out=$out"
+fi
+assert_zero_mutations "$LOG" "G1d: drift+missing --check makes zero mutating calls"
+rm -rf "$SCRATCH_BOTH"
+
+echo
 echo "===================="
 echo "  $pass_count passed, $fail_count failed"
 echo "===================="

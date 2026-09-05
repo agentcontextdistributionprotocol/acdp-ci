@@ -18,7 +18,11 @@ repo stays uniform instead of drifting.
 
 | Script | Purpose |
 |---|---|
-| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection to every managed repo. `allow_auto_merge` and required status checks are per-repo — zero-check repos (`acdp-ci`, `.github`) get protection only, never auto-merge. `--check` runs a read-only drift survey across every managed repo (mutates nothing; exits non-zero on drift or an unreadable repo). Fail-closed: refuses to apply a change that would remove a live required check it doesn't declare, unless `--allow-check-removal`. |
+| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection to every managed repo. `allow_auto_merge` and required status checks are per-repo — zero-check repos (`acdp-ci`, `.github`) get protection only, never auto-merge. `--check` runs a read-only drift survey across every managed repo (mutates nothing; exits non-zero on drift, an unreadable repo, or a declared check not yet applied). Fail-closed: refuses to apply a change that would remove a live required check it doesn't declare, unless `--allow-check-removal`. |
+
+| This repo's own workflow (not consumable via `uses:`) | Purpose |
+|---|---|
+| [`.github/workflows/drift-check.yml`](.github/workflows/drift-check.yml) | Weekly (+ manual) read-only sweep **local to acdp-ci** — no `workflow_call` trigger, so it cannot be adopted by another repo at `@v1` the way the reusable workflows above can. Runs `scripts/standardize.sh --check` across every managed repo and files/updates one tracking issue if it finds drift, an unreadable repo, or a declared check that hasn't been applied yet. `schedule`/`workflow_dispatch` only — no `pull_request` trigger, so `acdp-ci` stays a zero-check-run repo on its own PRs. |
 
 See **[DELIVERY-STANDARD.md](DELIVERY-STANDARD.md)** for the full model
 (dependency-propagation graph, credential design, rollout).
