@@ -1,0 +1,30 @@
+# Pre-fix baseline: scripts/standardize.sh (unmodified) silently drops a
+# live required check that checks_for() does not declare.
+#
+# Produced by tests/standardize/run.sh running the CURRENT, UNMODIFIED
+# scripts/standardize.sh against the tests/standardize/fixtures/registry-rs-drift
+# fixture, with the shadow gh (tests/standardize/bin/gh) in record mode
+# (GH_STUB_RECORD=1) so the run proceeds past the PATCH to the protection PUT
+# instead of being blocked at the first mutation.
+#
+# Live branches/main fixture declares 4 contexts (rustfmt, clippy, tests,
+# conformance (spec fixtures)); checks_for() for acdp-registry-rs in
+# scripts/standardize.sh only declares 3 (rustfmt, clippy, tests). Because
+# the script PUTs required_status_checks.contexts wholesale from that
+# 3-item table, the live 4th check is silently dropped from the request body
+# below -- this is the bug Phase 2 fixes.
+#
+# Command:
+#   FIXTURES=tests/standardize/fixtures/registry-rs-drift \
+#   GH_STUB_RECORD=1 GH_LOG=<log> \
+#   PATH=tests/standardize/bin:$PATH scripts/standardize.sh acdp-registry-rs
+#
+# Relevant $GH_LOG excerpt (the PUT call and its stdin body):
+#
+# gh api -X PUT repos/agentcontextdistributionprotocol/acdp-registry-rs/branches/main/protection --input - --jq if .required_status_checks then "  required checks: \(.required_status_checks.contexts | join(", "))" else "  required checks: (none — protection-only)" end
+# STDIN: {"required_status_checks":{"strict":true,"contexts":["rustfmt","clippy","tests"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}
+#
+# Parsed contexts array from that STDIN body:
+#   ["rustfmt","clippy","tests"]
+#
+# 'conformance (spec fixtures)' present in that array: false (should be true)
