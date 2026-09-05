@@ -354,6 +354,19 @@ Workflows scope, no matter what the App's org-wide installation grants.
 `bump-spec-ref.yml`'s token-mint step is the only one that additionally
 requests `permission-workflows: write`.
 
+**Callers pass `secrets:` explicitly, naming each secret the reusable workflow
+needs. `secrets: inherit` is prohibited for these reusable workflows.**
+`inherit` forwards *every* org and repo secret to the callee regardless of
+need, which undermines at the caller boundary exactly the mechanism the
+paragraph above documents as "enforced, not merely asserted": the callee's
+`permission-*` inputs can constrain what its own minted token carries, but
+they cannot constrain what the caller's `secrets:` block hands it in the
+first place. This rule governs only the caller's `secrets:` block — it says
+nothing about the caller's `permissions:` block. Where the callee mints no
+App token of its own and instead runs on the caller's own `GITHUB_TOKEN`
+(`auto-merge.yml`), that caller-side `permissions:` block stays load-bearing
+and must not be trimmed by analogy with this rule.
+
 **The `acdp-deps-bot` App's `Workflows: Read/write` is org-wide** — it can push to
 `.github/workflows/**` in every repo it's installed in, `acdp-ci` included. That
 is exactly the class of actor `main` branch protection (`scripts/standardize.sh`)

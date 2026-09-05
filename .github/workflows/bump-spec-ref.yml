@@ -19,6 +19,18 @@ name: bump-spec-ref
 # needs its extras bumped by hand in the same PR.
 #
 # Auth: the acdp-deps-bot App (org secrets ACDP_BOT_APP_ID / ACDP_BOT_PRIVATE_KEY).
+#
+# Caller shape:
+#   on:
+#     repository_dispatch: { types: [spec-released] }
+#     workflow_dispatch:   { inputs: { sha: { required: false, default: '' } } }
+#   jobs:
+#     bump:
+#       uses: agentcontextdistributionprotocol/acdp-ci/.github/workflows/bump-spec-ref.yml@v1
+#       with:  { file: .github/workflows/ci.yml, sha: '${{ github.event.inputs.sha }}' }
+#       secrets:
+#         ACDP_BOT_APP_ID: '${{ secrets.ACDP_BOT_APP_ID }}'
+#         ACDP_BOT_PRIVATE_KEY: '${{ secrets.ACDP_BOT_PRIVATE_KEY }}'
 
 on:
   workflow_call:
