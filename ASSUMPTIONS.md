@@ -66,3 +66,38 @@
   "block until zero violations," the fix is just holding the PR later; no code
   written under this assumption needs to change, only the merge timing.
 - **Status:** CONFIRMED (2026-08-29) — see DECISIONS.md.
+
+## `enforce_admins: false` on `acdp-ci`
+- **Plan:** plans/ci-wave5-standardize-drift-and-protection-apply.md
+- **Assumed:** Wave-1 Open Question 1 proposed defaulting `acdp-ci`'s branch
+  protection to `enforce_admins: false`, "pending confirmation — log as
+  UNCONFIRMED" — it was never logged and never resolved. The post-merge
+  runbook now bakes this into the repo that backs the `v1` tag.
+- **Chose:** keep `false` — status quo, matches `standardize.sh`'s protection
+  body as written, zero behaviour change, and it does not constrain the sole
+  maintainer while still constraining the `acdp-deps-bot` App and Dependabot
+  (neither is an admin).
+- **Alternatives:** `true` — would additionally protect `main` from the
+  maintainer's own accidental force-push, which matters because `v1` is
+  force-moved to wherever `main` points.
+- **Blast radius if wrong:** low — cheap to reverse, one field in one PUT.
+- **Status:** UNCONFIRMED.
+
+## `checkout-spec` action pinning convention: `@v1` vs. SHA
+- **Plan:** plans/ci-wave5-standardize-drift-and-protection-apply.md
+- **Assumed:** the spec-pinning rule as written conflates two independent
+  pins: the spec `ref:` itself (a 40-hex SHA, never in question) and how a
+  caller references the `checkout-spec` action (`@v1` vs. a full SHA). A peer
+  repo adopted the action SHA-pinned with a `# v1` comment and asked for a
+  ruling.
+- **Chose:** SHA-pinning the action with a trailing `# v1` comment (so
+  Dependabot still recognizes and bumps it) is the recommended shape; `@v1`
+  remains permitted. Full reasoning in DELIVERY-STANDARD.md's Spec
+  propagation section.
+- **Alternatives:** mandate `@v1` — rejected, binds every adopter to a
+  deliberately mutable tag this same wave is building guardrails around.
+  Mandate SHA — rejected, needlessly breaks existing `@v1` adopters for a
+  risk they may reasonably accept.
+- **Blast radius if wrong:** low — one line per adopter to reverse; affects
+  an org-wide convention, so worth a human confirm.
+- **Status:** UNCONFIRMED.

@@ -116,12 +116,47 @@ in the CI-4 plan).
 
 The spec (`agentcontextdistributionprotocol`) is a **dependency pinned by git
 SHA** in consumers' CI. **The rule: every repo whose CI consumes the spec MUST
-check it out at a 40-hex SHA via
-[`acdp-ci/actions/checkout-spec@v1`](actions/checkout-spec/README.md)** —
-never an unpinned/default-branch checkout. Adoption of a new SHA is always a
-reviewed PR, never auto-merged (below). As of 2026-08-28: `acdp-rs` pins via
-this action; `acdp-verifier-py` (PY-2) and `acdp-registry-rs` (REG-1) are
-scheduled to adopt it — until they do, their CI does not enforce this rule.
+check it out at a 40-hex commit SHA** — never an unpinned/default-branch
+checkout. That's satisfiable two ways: adopt
+[`acdp-ci/actions/checkout-spec@v1`](actions/checkout-spec/README.md) (the
+recommended path — see what it additionally buys, below), or pin the SHA
+directly with the inline pin shape (a raw `actions/checkout` step against
+the spec repo, with an explicit 40-hex `ref:`). Adoption of a new SHA is
+always a reviewed PR, never auto-merged (below).
+
+Snapshot, verified against each repo's `origin/main` (2026-09-05):
+`acdp-verifier-py` (`ci.yml:35`) has adopted the composite action.
+`acdp-rs` (`ci.yml:68-76`) and `acdp-registry-rs` satisfy the pinning rule
+using the inline pin shape instead — neither has adopted the action. All
+three repos pin at a 40-hex SHA today; only the mechanism differs, and this
+snapshot will drift as more repos migrate onto the composite action.
+
+Adopting the action buys two guards the inline shape doesn't have: it
+verifies the `ref:` input is 40 hex characters before checking anything out
+(a non-40-hex ref — e.g. a branch name — is rejected rather than silently
+checked out as "pinned"), and it refuses the combination `set-env: false` +
+`require-conformance: true` (the default), which would otherwise export
+`ACDP_REQUIRE_CONFORMANCE` without `ACDP_SPEC_DIR` — a hard failure in the
+test suites (e.g. `acdp-rs`'s) that read that var.
+
+This rule pins one thing — the **spec ref** itself. A second, independent
+pin is **how a caller references the `checkout-spec` action**: `@v1` (a
+mutable major tag) or a full commit SHA with a trailing `# v1` comment.
+**Ruling: SHA-pinning the action is the recommended shape; `@v1` remains
+permitted.** `v1` is deliberately force-moved to wherever `main` points —
+this repo applies branch protection and a `protect-v-tags` ruleset to `main`
+*because* that mutability is a real risk, so telling adopters to bind to the
+mutable tag itself would be incoherent. A bad retag reds every `@v1` adopter
+simultaneously with no local commit to bisect; SHA-pinning (with the `# v1`
+comment preserved so Dependabot still recognizes and bumps it) turns that
+into a per-repo, reviewable Dependabot PR instead, at the cost of one extra
+manual bump per adopter today. `acdp-verifier-py` is the sharpest case for
+this — its CI gates spec Final promotion, so a fleet-wide simultaneous break
+is costliest there. It also matches this repo's own risk grading elsewhere
+(SHA-pin third-party actions, tag-trust first-party `actions/*` — see
+Conventions in `README.md`): a cross-repo action maintained by one person,
+sitting behind a force-moved tag, reads closer to the third-party profile
+than to `actions/checkout@v4`.
 
 1. On a conformance-relevant push (`schemas/**`, `examples/**`, `rfcs/**`),
    the spec repo's `notify-spec-consumers.yml` dispatches
@@ -223,7 +258,8 @@ Consumes a family package via npm → additionally:
       above.
 
 The jobs satisfying this bar are the **required status checks** on `main`
-(configured by `scripts/standardize.sh`), so a red gate blocks the merge and
+(configured by `scripts/standardize.sh`, which now refuses to remove a live
+required check it doesn't declare), so a red gate blocks the merge and
 auto-merge never overrides it. acdp-rs exceeds this baseline. New SDK repos
 (Java / Go / Kotlin) inherit the bar, satisfied by their own ecosystem's tools.
 
@@ -243,7 +279,13 @@ themselves: `auto-merge.yml` hard-fails (rather than silently completing) on a
 repo whose `main` hasn't yet adopted `standardize.sh` branch protection with at
 least one required status check, and `bump-consume.yml`'s own auto-merge call
 (bot-authored SDK bump PRs) carries the identical guard — the PR still opens
-either way, only the unattended merge is withheld.
+either way, only the unattended merge is withheld. Note: once `acdp-ci` and
+`.github` are protected via `standardize.sh`, they still have **zero**
+required status checks by design (above) — so they'd still, correctly, fail
+this same guard. "Protected" must not be read as "passes the auto-merge
+guard." Harmless in practice today: neither repo calls `auto-merge.yml` —
+`acdp-ci`'s only mention of it is a comment in the workflow's own header, and
+the `.github` repo has no `.github/workflows/` directory at all.
 
 ## Credentials
 
