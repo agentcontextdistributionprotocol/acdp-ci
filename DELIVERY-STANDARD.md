@@ -6,35 +6,69 @@ kept local; everything else is shared here.
 
 ## Publish topology
 
-`acdp-rs` is the hub. It publishes three packages via three independent,
-tag-triggered workflows, each with its own registry credential:
+`acdp-rs` is the hub. It publishes four packages via four independent
+workflows (one push-triggered, three tag-triggered), each with its own
+registry credential:
 
 | Package | Workflow (in acdp-rs) | Trigger | Registry | Credential |
 |---|---|---|---|---|
 | `acdp` crate | `release-plz.yml` | push to `main` | crates.io | `CARGO_REGISTRY_TOKEN` |
 | `@agentcontextdistributionprotocol/acdp` (NAPI) | `bindings-release.yml` | tag `acdp-node-v*` | npm | `NPM_TOKEN` |
 | `acdp` wheels | `acdp-py-release.yml` | tag `acdp-py-v*` | PyPI | OIDC (no token) |
+| `@agentcontextdistributionprotocol/acdp-wasm` | `acdp-wasm-release.yml` | tag `acdp-wasm-v*` | npm | `NPM_TOKEN` |
 
-### Provenance is tag-anchored, not publish-anchored
+### Provenance is attestation-anchored, not publish-anchored
 
-Binding-release provenance is anchored at the release **tag**, not at the publish
-event itself. Every publish workflow in `acdp-rs` (`release-plz.yml`,
-`bindings-release.yml`, `acdp-py-release.yml`) also accepts `workflow_dispatch`
-for manual/dry-run use, alongside its normal tag trigger. Concretely, in
-`acdp-rs/.github/workflows/bindings-release.yml`, the `on:` block (lines 15-28)
-declares both `push: tags: acdp-node-v*` and `workflow_dispatch`, and the
-latter's `dry_run` input (line 25-28) defaults `true` but can be set `false` by
-an operator to force a real `npm publish` — the publish step's `if:` condition
-is `github.event_name == 'push' || !inputs.dry_run`, so a manual dispatch with
-`dry_run: false` publishes for real with **no tag ever pushed**.
+The invariant a consumer bump relies on: **a consumer bump requires a
+published artifact carrying a verifiable provenance attestation binding it
+to a commit, plus a release tag at that commit.** The attestation, not a
+`gitHead` field in the published manifest, is the actual proof — `gitHead` is
+self-asserted metadata the publish tooling writes, not something an outside
+party can verify. A reader verifies an artifact with
+`gh attestation verify <file> --repo <owner>/acdp-rs`.
+
+All three of `acdp-rs`'s binding-release workflows — `bindings-release.yml`
+(npm), `acdp-py-release.yml` (PyPI wheels), and `acdp-wasm-release.yml`
+(npm) — also accept `workflow_dispatch` for manual/dry-run use, alongside
+their normal tag trigger, and all three push a real release tag when a
+dispatch actually publishes — none of them leaves an untagged publish
+behind. Concretely, each declares a tag-push step gated on
+`github.event_name == 'workflow_dispatch' && !inputs.dry_run` that runs `git
+push origin` with the package's tag prefix:
+`bindings-release.yml:211`/`:223` (`acdp-node-v*`),
+`acdp-py-release.yml:210`/`:222` (`acdp-py-v*`), and
+`acdp-wasm-release.yml:132`/`:144` (`acdp-wasm-v*`). Each also mints a
+verifiable provenance attestation for its artifact before publishing: the two
+npm workflows run `actions/attest-build-provenance@v4` under job permissions
+`id-token: write` plus `attestations: write`
+(`bindings-release.yml:46-47`/`:110`, `acdp-wasm-release.yml:51-52`/`:111`)
+and publish with `npm publish --provenance`; `acdp-py-release.yml` runs the
+same `attest-build-provenance@v4` step per-artifact under the equivalent
+permissions (`:50-51`/`:91` for wheels, `:105-106`/`:121` for the sdist) and
+its separate `publish` job uploads PEP 740 attestations to PyPI via
+`pypa/gh-action-pypi-publish` (`attestations: true`, OIDC `id-token: write`
+at `:165`). So every real publish — tag-triggered or dispatched — carries a
+verifiable provenance attestation as well as a tag.
+
+**Limit: these builds are not bit-reproducible**, so the guarantee above rests
+on the attestation, not on independent rebuilding. `acdp-wasm-release.yml`
+installs `wasm-pack` unpinned via `taiki-e/install-action`; from identical
+Rust source, v0.8.3 and v0.8.5 produced wasm binaries with a 484-byte delta
+(tracked as `acdp-rs#196`, open). A consumer therefore verifies a bump by
+**checking the attestation**, not by rebuilding and diffing artifacts — the
+trust root is the attested GitHub Actions builder identity (the workflow,
+repo, and commit the attestation is signed over), not bit-for-bit
+reproducibility.
 
 `bump-consume.yml` (in this repo) only *propagates* whatever a registry
-actually serves — it has no way to tell whether the version it's bumping to
-came from a tag-triggered release (reviewable, provenance-anchored to a commit
-via the tag) or a manual `workflow_dispatch` (no tag, no anchor). A
-`workflow_dispatch` publish is for local/dry-run testing only; treating one as
-a real release breaks the provenance chain a consumer's bump PR implicitly
-claims to have.
+actually serves — it has no way to independently confirm the attestation on
+a consumer's behalf. What actually distinguishes a trustworthy release from
+one that isn't is the presence of a valid provenance attestation binding the
+published artifact to a commit, plus a tag at that commit — not which
+trigger (`push` vs. `workflow_dispatch`) produced it, since a non-dry-run
+dispatch produces both. A `dry_run: true` dispatch is the one case that
+produces neither a tag nor a publish, and should never be treated as a real
+release.
 
 ## Propagation graph
 
@@ -54,7 +88,15 @@ no `bump-acdp`:
 
 - **acdp-verifier-py** — independent second implementation of the verification
   core (for spec Final promotion). Its independence from `acdp-rs` is the point.
-- **acdp-ui-console**, **acdp-website** — Vercel deploys.
+- **acdp-website** — Vercel deploy, no family SDK dependency.
+
+`acdp-ui-console` is *not* in this list: `package.json:22` depends on
+`@agentcontextdistributionprotocol/acdp-wasm` (`^0.8.5`), a real family SDK
+dependency. It has no `bump-acdp.yml` and does not currently receive
+`acdp-released` dispatches, though — Dependabot's `npm` group is its only
+update path for that dependency today. Whether it should get the same
+dispatch-driven `bump-acdp` automation as the other consumers is tracked in
+`acdp-ui-console#70`, not decided here.
 
 ## Propagation mechanics
 
@@ -463,7 +505,7 @@ automatic, audit-logged bypass; rollback is one DELETE.
 | acdp-control-plane | npm | own ci | ✅ | npm+docker+ga | npm | Docker | consumes npm |
 | acdp-playground | Python/uv | own ci | add | uv+docker+ga | uv | Docker | consumes py |
 | acdp-verifier-py | Python | own ci | add | pip+ga | — | — | independent |
-| acdp-ui-console | TS | own ci | add | npm+ga | — | Vercel | leaf |
+| acdp-ui-console | TS | own ci | add | npm+ga | — | Vercel | consumes wasm (Dependabot only, no dispatch — acdp-ui-console#70) |
 | acdp-website | MDX | own ci | add | npm+ga | — | Vercel | leaf |
 | acdp-ci | YAML/bash | n/a — `workflow_call`/composite only, zero check-runs on its own PRs | ❌ (protection-only, see `standardize.sh`) | ga (2 dirs: root + `actions/checkout-spec`) | — | — | **infra — this is the hub; every repo above consumes it at `@v1`** |
 | `.github` | — | n/a — no `.github/workflows/` at all | ❌ (protection-only, see `standardize.sh`) | — | — | — | org profile + community health files |
