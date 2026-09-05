@@ -1,3 +1,9 @@
+# FROZEN — pre-fix evidence, do not regenerate: captured once against the
+# unmodified script before Phase 2's checks_for() correction; regenerating
+# it post-fix would overwrite the proof this bug ever existed with a
+# post-fix negative (the fixture is no longer drifted once checks_for() is
+# fixed). See tests/standardize/README.md, "What this phase proves".
+#
 # Pre-fix baseline: scripts/standardize.sh (unmodified) silently drops a
 # live required check that checks_for() does not declare.
 #
