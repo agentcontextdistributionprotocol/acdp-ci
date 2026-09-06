@@ -410,17 +410,39 @@ App token of its own and instead runs on the caller's own `GITHUB_TOKEN`
 (`auto-merge.yml`), that caller-side `permissions:` block stays load-bearing
 and must not be trimmed by analogy with this rule.
 
-**Adoption status (verified live, 2026-09-05): zero of six conforms.** All
-six live callers of these reusable workflows still use `secrets: inherit`:
-`acdp-control-plane/bump-acdp.yml`, `acdp-registry-rs/bump-acdp.yml`,
-`acdp-registry-rs/bump-spec.yml`, `acdp-playground/bump-acdp.yml`,
-`acdp-verifier-py/bump-spec.yml`, `acdp-rs/bump-spec.yml`. The org's
-`.github` workflow-templates already use the explicit named-secrets shape,
-so a repo newly adopting a template gets this right from the start — it is
-only these six pre-existing callers that haven't migrated. This is a
-tracked gap, not silently compliant: migration is
-[acdp-ci#13](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/13),
-and each fix is a 3-line caller edit requiring no `acdp-ci` change.
+**Adoption status — a dated snapshot, not a live figure. Re-read the source
+before citing it.** As of 2026-09-06, verified against each repo's default
+branch through the contents API, three of six call sites conform:
+
+| call site | shape |
+|---|---|
+| `acdp-control-plane/bump-acdp.yml` | explicit |
+| `acdp-playground/bump-acdp.yml` | explicit |
+| `acdp-verifier-py/bump-spec.yml` | explicit |
+| `acdp-rs/bump-spec.yml` | `inherit` |
+| `acdp-registry-rs/bump-acdp.yml` | `inherit` |
+| `acdp-registry-rs/bump-spec.yml` | `inherit` |
+
+This was zero of six when the rule was first written on 2026-08-29; the
+three migrations landed in the callers' own repos, with no `acdp-ci` change
+involved, which is precisely why a number written down here goes stale
+without anything in this repo changing. **The live source of truth is
+[acdp-ci#13](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/13)
+and the per-repo caller issues it links** — `acdp-rs#199` and
+`acdp-registry-rs#144` are the two still open, and they correspond exactly
+to the three remaining `inherit` sites above. Prefer reading those over
+trusting this table.
+
+The org's `.github` workflow-templates already use the explicit named-secrets
+shape, so a repo newly adopting a template gets this right from the start.
+Fixing a template does nothing for a repo that already copied the old shape,
+though — the remaining three are pre-existing callers, and each fix is a
+3-line caller edit requiring no `acdp-ci` change.
+
+Nothing automated checks this. `drift-check.yml` compares declared required
+status checks against live branch protection; it has no visibility into
+caller `secrets:` blocks in other repos, and a green drift-check says
+nothing about this rule either way.
 
 **The `acdp-deps-bot` App's `Workflows: Read/write` is org-wide** — it can push to
 `.github/workflows/**` in every repo it's installed in, `acdp-ci` included. That
