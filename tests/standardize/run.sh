@@ -375,14 +375,21 @@ fi
 assert_zero_mutations "$LOG" "check: in-sync repo makes zero mutating calls"
 
 # --- --check on an unreadable repo: reported as an ERROR, distinct from DRIFT ---
+# Exit 2, not 1: this invocation names a single repo, so an unreadable repo
+# means EVERY surveyed repo was unreadable and the run learned nothing. A
+# result you did not obtain must not share an exit code with a result you did
+# (drift/pending), because drift-check.yml treats exit 1 as a reportable
+# finding -- green job, routine-looking issue -- and anything else as a hard
+# failure. The partial case (some readable, some not) is still 1; that is
+# pinned separately in the sweep section below.
 FX="$FIXTURES_ROOT/protected-no-rsc"
 LOG="$(new_log)"
 out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check acdp-ci 2>&1)"
 rc=$?
-if [ "$rc" -eq 1 ] && ! printf '%s' "$out" | grep -q "!! DRIFT:"; then
-  pass "check: unreadable repo is reported distinctly from drift, and still exits 1"
+if [ "$rc" -eq 2 ] && ! printf '%s' "$out" | grep -q "!! DRIFT:"; then
+  pass "check: wholly-unreadable survey is fatal (exit 2), and distinct from drift"
 else
-  fail "check: unreadable repo is reported distinctly from drift, and still exits 1" "rc=$rc out=$out"
+  fail "check: wholly-unreadable survey is fatal (exit 2), and distinct from drift" "rc=$rc out=$out"
 fi
 assert_zero_mutations "$LOG" "check: unreadable repo still makes zero mutating calls"
 
@@ -502,7 +509,10 @@ rm -f "$SWEEP_FX/repos_${ORG}_acdp-control-plane_branches_main.json"
 LOG="$(new_log)"
 out="$(FIXTURES="$SWEEP_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
 rc=$?
-[ "$rc" -ne 0 ] && pass "sweep: --check exits nonzero when repo 1 is unreadable" || fail "sweep: --check exits nonzero when repo 1 is unreadable" "rc=$rc out=$out"
+# Exactly 1, not merely nonzero: 1 of 8 unreadable is a genuine per-repo
+# finding and must stay reportable. Only a wholly-failed survey escalates to
+# the fatal 2. Asserting "nonzero" here would let the two collapse together.
+[ "$rc" -eq 1 ] && pass "sweep: partial failure (1 of 8 unreadable) stays a finding, exit 1" || fail "sweep: partial failure (1 of 8 unreadable) stays a finding, exit 1" "rc=$rc out=$out"
 if printf '%s' "$out" | grep -q "acdp-control-plane"; then
   pass "sweep: the unreadable repo 1 is named in the output"
 else
@@ -687,6 +697,40 @@ else
 fi
 assert_zero_mutations "$LOG" "G1d: drift+missing --check makes zero mutating calls"
 rm -rf "$SCRATCH_BOTH"
+
+# --- FATAL vs FINDING: a run that never happened must not look like a result ---
+# drift-check.yml routes exit 1 to "file an issue, job green" and anything else
+# to a hard job failure. So every way the check can fail to RUN has to land
+# outside {0,1}, or a broken monitor reports as a working one.
+
+# (a) whole-sweep read failure -> 2, not 1. An empty fixture dir makes every
+# repo's read fail, standing in for a degraded token or an unreachable API.
+EMPTY_FX="$(mktemp -d)"
+LOG="$(new_log)"
+out="$(FIXTURES="$EMPTY_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
+rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "FATAL"; then
+  pass "fatal: every repo unreadable -> exit 2 and says FATAL in words"
+else
+  fail "fatal: every repo unreadable -> exit 2 and says FATAL in words" "rc=$rc out=$out"
+fi
+assert_zero_mutations "$LOG" "fatal: a wholly-failed survey makes zero mutating calls"
+rm -rf "$EMPTY_FX"
+
+# (b) a missing dependency -> 2, not 1. PATH keeps a shell and coreutils but
+# drops jq, so the preflight is what fires rather than an interpreter error.
+NOJQ_BIN="$(mktemp -d)"
+for _t in bash sh env cat sed grep printf mktemp rm gh; do
+  _src="$(command -v "$_t" 2>/dev/null)" && ln -sf "$_src" "$NOJQ_BIN/$_t"
+done
+out="$(PATH="$NOJQ_BIN" "$STANDARDIZE" --check 2>&1)"
+rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qi "jq"; then
+  pass "fatal: missing jq -> exit 2 and names the missing tool"
+else
+  fail "fatal: missing jq -> exit 2 and names the missing tool" "rc=$rc out=$out"
+fi
+rm -rf "$NOJQ_BIN"
 
 echo
 echo "===================="

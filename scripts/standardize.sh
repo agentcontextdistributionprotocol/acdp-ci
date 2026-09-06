@@ -178,6 +178,17 @@ Usage: standardize.sh [--check|--dry-run] [--allow-check-removal] [repo ...]
 
 With no repo arguments, all managed repos are processed. Apply mode (the
 default, no --check) needs gh auth with admin:org.
+
+Exit codes (a contract -- .github/workflows/drift-check.yml routes on these):
+  0  --check only: surveyed everything, nothing drifted, nothing pending.
+  1  A RESULT. The survey ran and found something worth reporting: drift,
+     a pending declared check, or some (but not all) repos unreadable.
+     drift-check.yml files/updates a tracking issue and leaves the job green.
+  2  NOT a result. The check could not run or learned nothing: bad flags, an
+     explicitly-named unmanaged repo, a missing dependency, or every surveyed
+     repo unreadable. drift-check.yml hard-fails the job.
+Keep 1 and 2 distinct. Collapsing them makes a monitor that cannot see report
+identically to one that looked and found nothing.
 EOF
 }
 
@@ -342,9 +353,29 @@ if [ "$CHECK_MODE" -eq 1 ] && [ "$ALLOW_CHECK_REMOVAL" -eq 1 ]; then
   exit 2
 fi
 
+# A missing tool is NOT a finding. Without this preflight, an absent `gh` or
+# `jq` makes every repo's read fail, which sets ERRORS and exits 1 -- the same
+# code as "surveyed everything, found drift". drift-check.yml treats exit 1 as
+# a reportable result, so the job would go GREEN and file a routine-looking
+# issue while the check had in fact never run. Exit 2 instead: the workflow's
+# case statement already routes anything outside {0,1} to a hard job failure.
+for _tool in gh jq; do
+  if ! command -v "$_tool" >/dev/null 2>&1; then
+    echo "standardize.sh: required command '$_tool' not found -- the check cannot run (this is a broken environment, not a drift finding)" >&2
+    exit 2
+  fi
+done
+
 DRIFT=0
 ERRORS=0
 PENDING=0
+# ERRORS is a flag, so one unreadable repo and every repo unreadable look
+# identical in the summary. Count them: total unreadable == total surveyed
+# means the survey as a whole failed (a degraded token, a network blackhole),
+# which must not be reported as a per-repo finding. See the SURVEYED check
+# at the end of --check.
+SURVEYED=0
+UNREADABLE=0
 
 for repo in $repos; do
   if ! lines=$(checks_for "$repo"); then
@@ -361,10 +392,12 @@ for repo in $repos; do
     fi
     continue
   fi
+  SURVEYED=$((SURVEYED + 1))
 
   if ! branch=$(default_branch "$repo"); then
     if [ "$CHECK_MODE" -eq 1 ]; then
       ERRORS=1
+      UNREADABLE=$((UNREADABLE + 1))
       continue
     else
       echo "!! $repo: cannot determine default branch — aborting before any mutation" >&2
@@ -403,6 +436,7 @@ for repo in $repos; do
   if ! live=$(live_contexts "$repo" "$branch"); then
     if [ "$CHECK_MODE" -eq 1 ]; then
       ERRORS=1
+      UNREADABLE=$((UNREADABLE + 1))
       continue
     else
       echo "!! $repo: cannot determine live required checks — aborting before any mutation" >&2
@@ -415,6 +449,7 @@ for repo in $repos; do
     echo "!! $repo: could not compute required-check drift (unexpected JSON)" >&2
     if [ "$CHECK_MODE" -eq 1 ]; then
       ERRORS=1
+      UNREADABLE=$((UNREADABLE + 1))
       continue
     else
       exit 1
@@ -459,6 +494,7 @@ for repo in $repos; do
     echo "!! $repo: could not compute pending-apply status (unexpected JSON)" >&2
     if [ "$CHECK_MODE" -eq 1 ]; then
       ERRORS=1
+      UNREADABLE=$((UNREADABLE + 1))
       continue
     else
       exit 1
@@ -516,6 +552,15 @@ for repo in $repos; do
 done
 
 if [ "$CHECK_MODE" -eq 1 ]; then
+  # Every surveyed repo failed to read. That is not eight independent findings
+  # -- it is one systemic failure (a degraded/expired token, gh unauthenticated,
+  # the API unreachable), and reporting it as a finding would file an issue and
+  # leave the job green, which is precisely the permission-degraded case this
+  # guard exists to make visible. Exit 2 so drift-check.yml hard-fails instead.
+  if [ "$SURVEYED" -gt 0 ] && [ "$UNREADABLE" -eq "$SURVEYED" ]; then
+    echo "--check: FATAL: all $SURVEYED surveyed repo(s) were unreadable -- this is a broken run, not a drift result (check gh auth and the token's contents:read grant); see '!!' lines above." >&2
+    exit 2
+  fi
   if [ "$DRIFT" -ne 0 ] || [ "$ERRORS" -ne 0 ] || [ "$PENDING" -ne 0 ]; then
     # Three independent conditions, tracked separately -- report exactly
     # which fired instead of a single blended "drift and/or errors" line
