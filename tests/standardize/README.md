@@ -176,6 +176,22 @@ Two of those counts come from assertions that a mutating call actually reached
 the `gh` stub — the strongest available form, since they prove the destructive
 PUT happens rather than merely that an exit code changed.
 
+Each mutant **declares which tests must kill it**, and the killer set must
+match exactly. Over-killing fails as loudly as under-killing: a mutant that
+kills more than it should has usually broken something broader than the guard
+it names, and the inflated number reads as extra confidence. A count is not
+evidence.
+
+Names come from a side channel (`FAILNAME_LOG`), never parsed out of the
+`FAIL:` line — three test names legitimately contain `" -- "` themselves (the
+`G4: --check -- <typo'd repo>` cases), so splitting on that separator would
+truncate them to `G4: --check`, merge three distinct tests into one, and make
+the comparison quietly wrong in both directions.
+
+A **control run** requires the unmutated suite to be green first. Without it,
+every kill count could be an artifact of an already-red tree rather than of
+the injected bug.
+
 **The trap this harness is built around.** A mutation that fails to apply runs
 the suite against unmodified code, sees zero failures, and reports "not
 caught" — identical output to a genuinely missed bug, and wrong in the more
@@ -183,6 +199,10 @@ alarming direction. Every substitution therefore asserts it matched exactly
 once, and an unapplied mutant exits 2 as a hard error rather than producing a
 result. This is not hypothetical: it happened three times while writing this
 file, each time reading as a clean pass.
+
+All three failure paths are themselves verified: a wrong declared set reports
+`MISMATCH` in both directions and exits 1, a red suite fails the control and
+exits 2, and a stale anchor exits 2 leaving the target restored.
 
 Same reason the fourth mutant exists at all. The third pins "a run that
 learned nothing must not look like a finding"; the fourth pins the opposite
