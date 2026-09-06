@@ -19,7 +19,7 @@ steps:
   # Your own checkout MUST come first — see "Ordering" below.
   - uses: actions/checkout@v4
 
-  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@v1
+  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b # v1
     id: spec
     with:
       ref: f5b66b8f86f48ba16f79bba95eb246d6acb43989 # pinned spec SHA — bumped via bump-spec-ref.yml

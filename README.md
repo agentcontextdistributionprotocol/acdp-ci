@@ -79,7 +79,7 @@ own repo's checkout:
 steps:
   - uses: actions/checkout@v4   # your own repo — must come first, see the action's README
 
-  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@v1
+  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b  # v1
     id: spec
     with:
       ref: f5b66b8f86f48ba16f79bba95eb246d6acb43989   # pinned spec SHA — bumped via bump-spec-ref.yml
@@ -98,4 +98,9 @@ in `acdp-rs` and are a separate concern.
 ## Conventions
 
 - Third-party actions are **SHA-pinned**; first-party `actions/*` use major tags.
-- Pin callers to a release tag (`@v1`), not `@main`.
+- Pin callers to a release tag (`@v1`), not `@main` — for the reusable
+  *workflows* (`bump-consume.yml`, `bump-spec-ref.yml`, `auto-merge.yml`).
+  The `checkout-spec` *action* is the documented exception: it MUST be
+  SHA-pinned (with a trailing `# v1` comment), not tag-pinned — see the
+  Ruling in the "Spec propagation" section of
+  [DELIVERY-STANDARD.md](DELIVERY-STANDARD.md).

@@ -94,14 +94,24 @@
 #              create check-runs on that head SHA, surfacing in that PR's
 #              checks -- but that's an operator act, not something this
 #              workflow's triggers do on their own, and acdp-ci requires
-#              zero checks regardless.) Protection
-#              still matters here: with enforce_admins:false it doesn't constrain
-#              the solo maintainer, but it does constrain the acdp-deps-bot App
-#              (Contents+Workflows write, org-wide) and Dependabot, neither of
-#              which is an admin. And since the `v1` tag is force-moved to wherever
-#              `main` points, protecting `main` from force-push/deletion is the
-#              upstream half of protecting `v1` (the ruleset in DELIVERY-STANDARD.md
-#              is the other half).
+#              zero checks regardless.)
+#              As of wave 5, this branch's body sets enforce_admins:true (the
+#              other branch below, for repos with required checks, is
+#              unchanged at enforce_admins:false — those repos' maintainer
+#              would otherwise be blocked by their own CI). What this
+#              protection body actually constrains: with
+#              required_pull_request_reviews:null and restrictions:null, `main`
+#              is NOT PR-gated and carries no push restriction -- this is
+#              force-push and branch-deletion protection only (now asserted
+#              explicitly, see allow_force_pushes/allow_deletions below), plus
+#              (with enforce_admins:true) binding that to the maintainer too.
+#              The acdp-deps-bot App still has Contents:write and CAN push a
+#              normal (non-force) commit straight to `main` -- that gap is
+#              real and not closed by this change; PR-gating would close it
+#              but is out of scope here. And since the `v1` tag is
+#              force-moved to wherever `main` points, protecting `main` from
+#              force-push/deletion is the upstream half of protecting `v1`
+#              (the ruleset in DELIVERY-STANDARD.md is the other half).
 #   .github  — the org's `.github` repo has no `.github/workflows/` directory at
 #              all (verified via the contents API) — same reasoning as acdp-ci.
 # Neither gets allow_auto_merge=true: auto-merge.yml's `gh pr merge --auto` would
@@ -117,17 +127,27 @@
 #
 # Known gaps — every run also resets the following to GitHub's defaults,
 # regardless of what was live before, because the protection PUT body below
-# only ever sets required_status_checks plus the three fields explicitly
-# nulled: strict, enforce_admins, required_pull_request_reviews,
-# restrictions, required_status_checks.checks (the per-check app_id pinning
-# — verified live 2026-09-05: acdp-registry-rs has all four checks pinned to
-# app_id:15368, while acdp-control-plane is MIXED, one check pinned and two
-# app_id:null — direct evidence that a prior contexts-only PUT already
-# widened two of its checks to "any app"), required_linear_history,
-# allow_force_pushes, allow_deletions, required_conversation_resolution,
-# lock_branch, block_creations, allow_fork_syncing. And, as noted above, the
-# drift guard cannot see a real PR gate that was never added to
-# checks_for() in the first place (axis C).
+# only ever sets required_status_checks, enforce_admins,
+# required_pull_request_reviews, restrictions, allow_force_pushes, and
+# allow_deletions (the last two now asserted explicitly as of wave 5, rather
+# than relying on undocumented PUT defaults): strict (only set on the
+# has-checks branch), required_status_checks.checks (the per-check app_id
+# pinning — verified live 2026-09-05: acdp-registry-rs has all four checks
+# pinned to app_id:15368, while acdp-control-plane is MIXED, one check
+# pinned and two app_id:null — direct evidence that a prior contexts-only
+# PUT already widened two of its checks to "any app"),
+# required_linear_history, required_conversation_resolution, lock_branch,
+# block_creations, allow_fork_syncing. And, as noted above, the drift guard
+# cannot see a real PR gate that was never added to checks_for() in the
+# first place (axis C).
+#
+# enforce_admins is itself a known gap in the drift guard: live_contexts()
+# and the drift comparison above look at required_status_checks.contexts
+# only, so a future hand-edit or out-of-band PUT that flips enforce_admins
+# back to false on a protection-only repo is invisible to both --check and
+# a normal apply — nothing here would notice or restore it. Extending the
+# guard to compare the full protection object (not just contexts) is a
+# named wave-6 item, not attempted in this change.
 #
 # Prereqs: gh auth with admin:org for apply; contents:read is enough to run
 #          --check. Org secrets (App id/key) are set separately.
@@ -363,7 +383,7 @@ for repo in $repos; do
     # `set -u` a skipped assignment here would abort the script instead.
     auto_merge=false
     contexts_json='[]'
-    protection_json='{"required_status_checks":null,"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}'
+    protection_json='{"required_status_checks":null,"enforce_admins":true,"required_pull_request_reviews":null,"restrictions":null,"allow_force_pushes":false,"allow_deletions":false}'
   else
     auto_merge=true
     contexts_json=$(printf '%s' "$lines" | jq -R . | jq -sc .)
@@ -371,7 +391,9 @@ for repo in $repos; do
       required_status_checks: { strict: true, contexts: $ctx },
       enforce_admins: false,
       required_pull_request_reviews: null,
-      restrictions: null
+      restrictions: null,
+      allow_force_pushes: false,
+      allow_deletions: false
     }')
   fi
 

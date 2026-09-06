@@ -160,8 +160,9 @@ The spec (`agentcontextdistributionprotocol`) is a **dependency pinned by git
 SHA** in consumers' CI. **The rule: every repo whose CI consumes the spec MUST
 check it out at a 40-hex commit SHA** — never an unpinned/default-branch
 checkout. That's satisfiable two ways: adopt
-[`acdp-ci/actions/checkout-spec@v1`](actions/checkout-spec/README.md) (the
-recommended path — see what it additionally buys, below), or pin the SHA
+[`acdp-ci/actions/checkout-spec`](actions/checkout-spec/README.md), SHA-pinned
+(the recommended path — see what it additionally buys, below; see the
+Ruling below for how to pin the action itself), or pin the SHA
 directly with the inline pin shape (a raw `actions/checkout` step against
 the spec repo, with an explicit 40-hex `ref:`). Adoption of a new SHA is
 always a reviewed PR, never auto-merged (below).
@@ -184,21 +185,42 @@ test suites (e.g. `acdp-rs`'s) that read that var.
 This rule pins one thing — the **spec ref** itself. A second, independent
 pin is **how a caller references the `checkout-spec` action**: `@v1` (a
 mutable major tag) or a full commit SHA with a trailing `# v1` comment.
-**Ruling: SHA-pinning the action is the recommended shape; `@v1` remains
-permitted.** `v1` is deliberately force-moved to wherever `main` points —
-this repo applies branch protection and a `protect-v-tags` ruleset to `main`
-*because* that mutability is a real risk, so telling adopters to bind to the
-mutable tag itself would be incoherent. A bad retag reds every `@v1` adopter
-simultaneously with no local commit to bisect; SHA-pinning (with the `# v1`
-comment preserved so Dependabot still recognizes and bumps it) turns that
-into a per-repo, reviewable Dependabot PR instead, at the cost of one extra
-manual bump per adopter today. `acdp-verifier-py` is the sharpest case for
-this — its CI gates spec Final promotion, so a fleet-wide simultaneous break
-is costliest there. It also matches this repo's own risk grading elsewhere
-(SHA-pin third-party actions, tag-trust first-party `actions/*` — see
-Conventions in `README.md`): a cross-repo action maintained by one person,
-sitting behind a force-moved tag, reads closer to the third-party profile
-than to `actions/checkout@v4`.
+**Ruling: callers MUST pin `checkout-spec` by full commit SHA, with a
+trailing `# v1` comment kept for human readability** — e.g.
+`agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b  # v1`.
+`@v1` is no longer the documented shape for this action. This mandate costs
+**zero migrations today**: `acdp-verifier-py` is the only repo that has
+adopted the action at all, and it is already SHA-pinned this way.
+
+`acdp-ci`'s `main` is currently **unprotected**, and has **no CI of its
+own** — every workflow here is either `workflow_call`-only
+(`auto-merge.yml`, `bump-consume.yml`, `bump-spec-ref.yml`) or
+`schedule`/`workflow_dispatch`-only (`drift-check.yml`), so `main` produces
+zero check-runs from its own PRs (the reason `scripts/standardize.sh`
+manages this repo protection-only — see Releasing `acdp-ci` below). `v1` is
+force-moved to wherever `main` points, wholesale, with no filtering by
+change type — even a docs-only merge retags it. Binding a caller to `@v1`
+therefore binds it to an untested, admin-bypass-moved pointer, not to
+anything resembling a release. A bad retag also reds every `@v1` adopter
+simultaneously with no local commit to bisect; SHA-pinning turns that into
+**containment** — a bad retag reds nobody, since no caller resolves the
+mutable tag at build time — which is the primary justification, because it
+holds even with no Dependabot configured at all. The trailing `# v1`
+comment does **not** drive Dependabot's recognition of the pin — Dependabot
+parses the `uses:` line itself regardless of any comment; the comment is
+preserved purely as a human-readable annotation of which major the pinned
+SHA corresponds to. A Dependabot-driven catch-up bump is a real but
+*secondary* and, so far, **unverified** path: `acdp-ci` has exactly one tag
+(`v1`) and no releases, so today the only PR Dependabot could ever open
+against this pin is `v1 → v1` at a different SHA — no version delta — and
+that path has never fired in this org. `acdp-verifier-py` is the sharpest
+case for pinning regardless of any Dependabot mechanics — its CI gates spec
+Final promotion, so a fleet-wide simultaneous break is costliest there. It
+also matches this repo's own risk grading elsewhere (SHA-pin third-party
+actions, tag-trust first-party `actions/*` — see Conventions in
+`README.md`): a cross-repo action maintained by one person, sitting behind
+a force-moved tag, reads closer to the third-party profile than to
+`actions/checkout@v4`.
 
 1. On a conformance-relevant push (`schemas/**`, `examples/**`, `rfcs/**`),
    the spec repo's `notify-spec-consumers.yml` dispatches
@@ -219,7 +241,7 @@ that needs the spec:
 steps:
   - uses: actions/checkout@v4   # your own repo — MUST come first, see Ordering
 
-  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@v1
+  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b  # v1
     id: spec
     with:
       ref: f5b66b8f86f48ba16f79bba95eb246d6acb43989   # pinned spec SHA — bumped via bump-spec-ref.yml
@@ -376,9 +398,13 @@ merge past protection, and cannot touch the `v1` tag at all.
 
 ## Releasing `acdp-ci` (the `v1` tag)
 
-Every consumer resolves `acdp-ci/.github/workflows/*@v1` and
-`acdp-ci/actions/checkout-spec@v1` at that one **mutable** tag. Moving it is a
-**human-assisted** operation — no agent or workflow ever runs these commands.
+Every consumer resolves `acdp-ci/.github/workflows/*@v1` at that one
+**mutable** tag on every run. `acdp-ci/actions/checkout-spec` is the
+exception, by ruling (above): callers pin it by full commit SHA, so a
+`checkout-spec` caller does not re-resolve `v1` on every run — it stays on
+whatever SHA it last bumped to, until it deliberately bumps again. Moving
+`v1` is a **human-assisted** operation — no agent or workflow ever runs
+these commands.
 Run this **after** a PR to `acdp-ci` merges, and **before** creating/relying on
 the `v*` tag ruleset below (rehearse the move first; a ruleset created before the
 move has ever been exercised means the first failure mode is a rejected push
