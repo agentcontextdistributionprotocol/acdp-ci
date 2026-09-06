@@ -1,0 +1,1 @@
+{"name":"main","protected":true,"protection":{"enabled":true,"required_status_checks":{"enforcement_level":"non_admins","contexts":["rustfmt","clippy","tests","conformance (spec fixtures)"],"checks":[{"context":"rustfmt","app_id":15368},{"context":"clippy","app_id":15368},{"context":"tests","app_id":15368},{"context":"conformance (spec fixtures)","app_id":15368}]}}}

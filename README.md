@@ -18,7 +18,11 @@ repo stays uniform instead of drifting.
 
 | Script | Purpose |
 |---|---|
-| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection to every managed repo. `allow_auto_merge` and required status checks are per-repo — zero-check repos (`acdp-ci`, `.github`) get protection only, never auto-merge. |
+| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection to every managed repo. `allow_auto_merge` and required status checks are per-repo — zero-check repos (`acdp-ci`, `.github`) get protection only, never auto-merge. `--check` runs a read-only drift survey across every managed repo (mutates nothing; exits non-zero on drift, an unreadable repo, or a declared check not yet applied). Fail-closed: refuses to apply a change that would remove a live required check it doesn't declare, unless `--allow-check-removal`. |
+
+| This repo's own workflow (not consumable via `uses:`) | Purpose |
+|---|---|
+| [`.github/workflows/drift-check.yml`](.github/workflows/drift-check.yml) | Weekly (+ manual) read-only sweep **local to acdp-ci** — no `workflow_call` trigger, so it cannot be adopted by another repo at `@v1` the way the reusable workflows above can. Runs `scripts/standardize.sh --check` across every managed repo and files/updates one tracking issue if it finds drift, an unreadable repo, or a declared check that hasn't been applied yet. `schedule`/`workflow_dispatch` only — no `pull_request` trigger, so `acdp-ci` stays a zero-check-run repo on its own PRs. |
 
 See **[DELIVERY-STANDARD.md](DELIVERY-STANDARD.md)** for the full model
 (dependency-propagation graph, credential design, rollout).
@@ -75,7 +79,7 @@ own repo's checkout:
 steps:
   - uses: actions/checkout@v4   # your own repo — must come first, see the action's README
 
-  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@v1
+  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b  # v1
     id: spec
     with:
       ref: f5b66b8f86f48ba16f79bba95eb246d6acb43989   # pinned spec SHA — bumped via bump-spec-ref.yml
@@ -94,4 +98,9 @@ in `acdp-rs` and are a separate concern.
 ## Conventions
 
 - Third-party actions are **SHA-pinned**; first-party `actions/*` use major tags.
-- Pin callers to a release tag (`@v1`), not `@main`.
+- Pin callers to a release tag (`@v1`), not `@main` — for the reusable
+  *workflows* (`bump-consume.yml`, `bump-spec-ref.yml`, `auto-merge.yml`).
+  The `checkout-spec` *action* is the documented exception: it MUST be
+  SHA-pinned (with a trailing `# v1` comment), not tag-pinned — see the
+  Ruling in the "Spec propagation" section of
+  [DELIVERY-STANDARD.md](DELIVERY-STANDARD.md).

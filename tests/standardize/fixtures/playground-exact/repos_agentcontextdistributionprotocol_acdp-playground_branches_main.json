@@ -1,0 +1,1 @@
+{"name":"main","protected":true,"protection":{"enabled":true,"required_status_checks":{"enforcement_level":"non_admins","contexts":["pytest + smoke (py3.12)","pytest + smoke (py3.13)"],"checks":[{"context":"pytest + smoke (py3.12)","app_id":15368},{"context":"pytest + smoke (py3.13)","app_id":15368}]}}}

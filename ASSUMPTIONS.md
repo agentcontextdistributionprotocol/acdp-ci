@@ -6,8 +6,8 @@
   `.github/actions/checkout-spec/`.
 - **Chose:** repo root — `.github/actions/` conventionally holds actions for
   a repo's own internal use; this one is published for external (cross-repo)
-  consumption, and `…/acdp-ci/actions/checkout-spec@v1` reads correctly as a
-  public interface.
+  consumption, and `…/acdp-ci/actions/checkout-spec` (pinned per the wave-5
+  SHA-pinning ruling) reads correctly as a public interface.
 - **Alternatives:** `.github/actions/checkout-spec/` — rejected, wrong
   connotation for a published cross-repo primitive.
 - **Blast radius if wrong:** cheap to reverse *now* — nothing has adopted it
@@ -66,3 +66,52 @@
   "block until zero violations," the fix is just holding the PR later; no code
   written under this assumption needs to change, only the merge timing.
 - **Status:** CONFIRMED (2026-08-29) — see DECISIONS.md.
+
+## `enforce_admins` on `acdp-ci` (protection-only repos)
+- **Plan:** plans/ci-wave5-standardize-drift-and-protection-apply.md
+- **Assumed:** Wave-1 Open Question 1 proposed defaulting `acdp-ci`'s branch
+  protection to `enforce_admins: false`, "pending confirmation — log as
+  UNCONFIRMED" — it was never logged and never resolved. The post-merge
+  runbook now bakes this into the repo that backs the `v1` tag.
+- **Chose:** `enforce_admins: true`, but **scoped to the protection-only
+  body only** (`acdp-ci` and `.github` — the branch `checks_for()` returns
+  empty for). The 6 code-shipping repos keep `enforce_admins: false`,
+  unchanged, because they DO have required checks and `true` there would
+  block the maintainer on their own CI. For the two protection-only repos
+  there is no required-check friction to create, and `v1` is force-moved to
+  wherever `main` points, so binding the maintainer's own force-push/deletion
+  to the same rule closes a real gap at zero cost. Note: `enforce_admins` is
+  NOT covered by the drift guard (which compares `required_status_checks.contexts`
+  only) — a future edit could silently revert it with nothing to catch that;
+  see `scripts/standardize.sh`'s Known-Gaps header (named as a wave-6 item).
+- **Alternatives:** keep `false` — status quo, zero behaviour change, but
+  leaves the maintainer's own accidental force-push/deletion on `main`
+  unconstrained even though `v1` is force-moved to wherever `main` points.
+  Rejected on reconcile.
+- **Blast radius if wrong:** low — cheap to reverse, one field in one PUT.
+- **Status:** CONFIRMED (2026-09-05) — see DECISIONS.md.
+
+## `checkout-spec` action pinning convention: `@v1` vs. SHA
+- **Plan:** plans/ci-wave5-standardize-drift-and-protection-apply.md
+- **Assumed:** the spec-pinning rule as written conflates two independent
+  pins: the spec `ref:` itself (a 40-hex SHA, never in question) and how a
+  caller references the `checkout-spec` action (`@v1` vs. a full SHA). A peer
+  repo adopted the action SHA-pinned with a `# v1` comment and asked for a
+  ruling.
+- **Chose:** SHA-pinning is **mandated**, with a trailing `# v1` comment kept
+  for human readability (the comment does not drive Dependabot's
+  recognition of the pin — Dependabot parses the `uses:` line itself
+  regardless). `@v1` is no longer the documented shape for this action. This
+  costs zero migrations: `acdp-verifier-py` is the only repo that has
+  adopted the action at all, and it is already SHA-pinned. Full reasoning in
+  DELIVERY-STANDARD.md's Spec propagation section.
+- **Alternatives:** mandate `@v1` — rejected, binds every adopter to a
+  deliberately mutable tag this same wave is building guardrails around.
+  Recommend-but-permit both shapes — rejected on reconcile: it was
+  originally rejected as "breaking existing `@v1` adopters," but no such
+  adopters exist, so the dual shape only bought a silent bias toward `@v1`
+  (four copy-paste sites showed `@v1`; "recommended" appeared once in
+  prose).
+- **Blast radius if wrong:** low — one line per adopter to reverse; affects
+  an org-wide convention, so worth a human confirm.
+- **Status:** CONFIRMED (2026-09-05) — see DECISIONS.md.

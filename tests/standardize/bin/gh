@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# tests/standardize/bin/gh — shadow `gh` binary for offline testing of
+# scripts/standardize.sh. See tests/standardize/README.md for the contract.
+#
+# Only `gh api ...` is supported (the only subcommand standardize.sh uses).
+#
+# Modes (selected by $GH_STUB_RECORD):
+#   unset/0 (block, default) — serve GET from fixtures; any mutating call
+#     (-X/--method with a non-GET value) prints "BLOCKED MUTATION <method>
+#     <path>" to stderr and exits 99. Never touches the network.
+#   1 (record) — serve GET from fixtures; a mutating call is logged (full
+#     argv + stdin body) to $GH_LOG, a minimal plausible success JSON is
+#     echoed to stdout (put through --jq like a real response would be),
+#     and the stub exits 0.
+#
+# Every invocation (both modes) is appended to $GH_LOG when that variable is
+# set, so run.sh can assert on call counts and bodies after the fact.
+#
+# bash 3.2 compatible (no `declare -A`, `local -n`, `mapfile`, `${var^^}`,
+# `[[ -v ]]`, `&>>`).
+
+set -u
+
+log_line() {
+  if [ -n "${GH_LOG:-}" ]; then
+    printf '%s\n' "$1" >> "$GH_LOG"
+  fi
+}
+
+if [ "${1:-}" != "api" ]; then
+  echo "fake gh: unsupported subcommand (only 'api' is stubbed): $*" >&2
+  exit 1
+fi
+shift
+
+if [ -z "${FIXTURES:-}" ]; then
+  echo "fake gh: \$FIXTURES is not set — nowhere to read fixture JSON from" >&2
+  exit 1
+fi
+
+# Reconstruct the invocation for logging BEFORE consuming any args below.
+argv_repr="gh api"
+for a in "$@"; do
+  argv_repr="$argv_repr $a"
+done
+
+method="GET"
+jq_filter=""
+api_path=""
+read_stdin=0
+input_file=""
+f_pairs=""   # -F key=value pairs, newline-separated (typed: true/false/number/null coerced)
+lf_pairs=""  # -f key=value pairs, newline-separated (always string)
+
+# Positional argv parser. MUST consume the arguments of -F, -f, -H, --input,
+# --jq, -X, --method so none of them is ever mistaken for the API path. The
+# API path is the first non-flag, non-consumed token encountered.
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -X|--method)
+      method="$2"
+      shift 2
+      ;;
+    --jq)
+      jq_filter="$2"
+      shift 2
+      ;;
+    -H)
+      shift 2
+      ;;
+    -F)
+      f_pairs="$f_pairs
+$2"
+      shift 2
+      ;;
+    -f)
+      lf_pairs="$lf_pairs
+$2"
+      shift 2
+      ;;
+    --input)
+      input_file="$2"
+      if [ "$input_file" = "-" ]; then
+        read_stdin=1
+      fi
+      shift 2
+      ;;
+    -*)
+      # Unrecognized flag: consume just the flag itself. Not expected for
+      # anything standardize.sh calls; kept defensive rather than fatal.
+      shift
+      ;;
+    *)
+      if [ -z "$api_path" ]; then
+        api_path="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+body=""
+if [ "$read_stdin" -eq 1 ]; then
+  body="$(cat -)"
+elif [ -n "$input_file" ] && [ -f "$input_file" ]; then
+  body="$(cat "$input_file")"
+fi
+
+log_line "$argv_repr"
+if [ -n "$body" ]; then
+  log_line "STDIN: $body"
+fi
+
+is_mutation=0
+case "$method" in
+  GET|get) is_mutation=0 ;;
+  *) is_mutation=1 ;;
+esac
+
+# Apply --jq (if given) to a JSON string exactly like real `gh --jq` does:
+# `jq -r <filter>`. Exit status is jq's, so a parse/filter failure surfaces
+# as a non-zero exit rather than being swallowed.
+apply_jq() {
+  if [ -n "$jq_filter" ]; then
+    printf '%s' "$1" | jq -r "$jq_filter"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+if [ "$is_mutation" -eq 0 ]; then
+  fixture_name="$(printf '%s' "$api_path" | tr '/' '_')"
+  fixture_file="$FIXTURES/${fixture_name}.json"
+  if [ ! -f "$fixture_file" ]; then
+    echo "fake gh: missing fixture for GET $api_path: $fixture_file" >&2
+    exit 1
+  fi
+  content="$(cat "$fixture_file")"
+  apply_jq "$content"
+  rc=$?
+  exit "$rc"
+fi
+
+# --- mutating call from here on ---
+
+if [ "${GH_STUB_RECORD:-0}" != "1" ]; then
+  echo "BLOCKED MUTATION $method $api_path" >&2
+  log_line "BLOCKED MUTATION $method $api_path"
+  exit 99
+fi
+
+# record mode: build a minimal plausible success body.
+pairs_to_json() {
+  # $1: "typed" (coerce true/false/null/number) or "string" (leave as string).
+  # Reads newline-separated "key=value" pairs on stdin.
+  if [ "$1" = "typed" ]; then
+    jq -R -s '
+      split("\n") | map(select(length > 0)) |
+      map(split("=") | {k: .[0], v: (.[1:] | join("="))}) |
+      map(
+        .v as $v | .k as $k |
+        { ($k): (
+            if $v == "true" then true
+            elif $v == "false" then false
+            elif $v == "null" then null
+            elif ($v | test("^-?[0-9]+$")) then ($v | tonumber)
+            else $v end
+          )
+        }
+      ) |
+      reduce .[] as $o ({}; . + $o)
+    '
+  else
+    jq -R -s '
+      split("\n") | map(select(length > 0)) |
+      map(split("=") | {k: .[0], v: (.[1:] | join("="))}) |
+      map({ (.k): .v }) |
+      reduce .[] as $o ({}; . + $o)
+    '
+  fi
+}
+
+if [ -n "$body" ]; then
+  response="$body"
+else
+  typed_json="{}"
+  if [ -n "$f_pairs" ]; then
+    typed_json="$(printf '%s' "$f_pairs" | pairs_to_json typed)"
+  fi
+  string_json="{}"
+  if [ -n "$lf_pairs" ]; then
+    string_json="$(printf '%s' "$lf_pairs" | pairs_to_json string)"
+  fi
+  response="$(jq -nc --argjson a "$typed_json" --argjson b "$string_json" '$a + $b')"
+fi
+
+log_line "RESPONSE: $response"
+apply_jq "$response"
+rc=$?
+exit "$rc"

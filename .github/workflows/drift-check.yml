@@ -1,0 +1,161 @@
+name: drift-check
+
+# CI-8: nothing else ever *runs* scripts/standardize.sh --check, so a live
+# required-check drift, an unreadable repo, or a declared-but-not-yet-live
+# check can sit undetected between manual audits -- exactly how the
+# acdp-registry-rs drift went unnoticed. This workflow runs the read-only
+# survey on a schedule and files/updates a single tracking issue when it
+# finds something. A green run is silent: no issue, no comment, nothing to
+# look at.
+#
+# Deliberately NO `pull_request` trigger. This is acdp-ci's own repo, and
+# acdp-ci is managed by scripts/standardize.sh as protection-only: "every
+# workflow here produces zero check-runs on its own PRs" is the load-bearing
+# fact that keeps it that way (see the script's header and
+# DELIVERY-STANDARD.md's repo matrix). `schedule` and `workflow_dispatch`
+# never run as a PR-triggered event, and the scheduled run executes on the
+# default branch only, so neither attaches a check-run to a PR on its own;
+# `pull_request` would, which would silently turn acdp-ci into a check-run
+# producer on its own PRs and invalidate that rationale. Don't add one.
+# (A deliberate operator `workflow_dispatch` run against a PR's head branch
+# does create check-runs on that head SHA, surfacing in that PR's checks --
+# that's an operator act, not something this workflow's triggers do on
+# their own, and acdp-ci requires zero checks regardless.)
+#
+# Two tokens, two different jobs -- do not try to collapse this to one:
+#   - App installation token (acdp-deps-bot, org secrets ACDP_BOT_APP_ID /
+#     ACDP_BOT_PRIVATE_KEY), minted with ONLY `permission-contents: read`
+#     and scoped org-wide via `owner:` -- this is what standardize.sh
+#     --check needs to `gh api` every managed repo's branch summary.
+#     GITHUB_TOKEN would in fact suffice for this READ today: every managed
+#     repo is public, and `.protection` (including
+#     `required_status_checks.contexts`) is readable even unauthenticated --
+#     verified live against acdp-registry-rs. The App token is used
+#     deliberately anyway, so the survey keeps working unchanged if a
+#     managed repo is ever made private in the future, the way acdp-website
+#     already is -- which is precisely why acdp-website is excluded from the
+#     managed set. GITHUB_TOKEN here is scoped to acdp-ci alone and could
+#     never read a private sibling; the App's org-wide installation can.
+#   - GITHUB_TOKEN, for filing/commenting the tracking issue in *this*
+#     repo. The acdp-deps-bot App has no Issues permission (see
+#     DELIVERY-STANDARD.md's credential table: Contents, Pull requests,
+#     Workflows -- nothing else), and this phase does not request one; the
+#     credential model here is "zero PATs," and adding a new App grant for
+#     this alone is out of scope.
+# Neither token can do the other's half of the job.
+#
+# Runbook safety note: live_contexts treats protected:true with an ABSENT
+# required_status_checks key as unreadable. That's the exact state the
+# post-merge apply runbook creates on acdp-ci/.github themselves --
+# protection applied with zero required checks -- and it has never been
+# observed live. Evidence suggests it's fine (even unprotected repos return
+# the key, with enforcement_level:"off"), but if that's wrong, this weekly
+# job would file an "unreadable repo" issue for those two repos forever.
+# After first applying protection to a zero-check repo, run
+# `./scripts/standardize.sh --check` once by hand before relying on this
+# schedule to catch problems.
+
+on:
+  schedule:
+    # Weekly, Monday 06:17 UTC -- well outside US/EU business hours (avoids
+    # competing with the org's other scheduled/CI load) and off the top of
+    # the hour (GitHub's scheduler queues everything pinned to :00 together,
+    # so a few minutes' offset keeps this run from queuing behind that
+    # crowd).
+    - cron: '17 6 * * 1'
+  workflow_dispatch: {}
+
+# A manual dispatch can overlap the weekly cron. Without this, two
+# concurrent runs both finding something would each list-then-create against
+# the tracking issue with no coordination, racing to file two duplicate
+# issues instead of one filed / one commented. cancel-in-progress stays
+# false: this is a read-only survey plus an issue file-or-comment, not a
+# deployment -- letting an in-flight run finish and simply queuing the
+# other behind it is strictly safer than cutting one off mid-survey.
+concurrency:
+  group: drift-check
+  cancel-in-progress: false
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Mint GitHub App token (cross-repo reads)
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.ACDP_BOT_APP_ID }}
+          private-key: ${{ secrets.ACDP_BOT_PRIVATE_KEY }}
+          permission-contents: read
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v7
+
+      - name: Run standardize.sh --check
+        id: check
+        env:
+          # standardize.sh shells out to `gh api` -- without GH_TOKEN it
+          # authenticates as nothing and every read fails closed as
+          # "unreadable repo," which would misreport as drift.
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set +e
+          ./scripts/standardize.sh --check | tee drift-check-output.txt
+          status="${PIPESTATUS[0]}"
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          case "$status" in
+            0|1) ;; # 0 = clean, 1 = drift and/or an unreadable repo and/or a declared-but-not-yet-live check -- all three are expected outcomes
+            *)
+              # Anything else (script missing/not executable, bad flags,
+              # internal jq/gh error) is NOT a drift signal -- it means the
+              # check never actually ran to completion. Fail the job loudly
+              # instead of silently treating this as "no drift found."
+              echo "::error::scripts/standardize.sh --check exited $status (expected 0=clean or 1=drift/errors/pending-apply) -- the check did not complete; treating this as a hard job failure, not a drift result."
+              exit "$status"
+              ;;
+          esac
+
+      - name: File or update the drift tracking issue
+        if: steps.check.outputs.status == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          LABEL=drift-check
+
+          gh label create "$LABEL" \
+            --color B60205 \
+            --description "Automated: branch-protection drift, an unreadable repo, or a declared check not yet applied, found by standardize.sh --check" \
+            --force >/dev/null
+
+          {
+            echo "\`scripts/standardize.sh --check\` found required-status-check drift, an unreadable repo, **or** a declared check not yet applied, on this run."
+            echo
+            echo "\`--check\` is fail-closed: it exits non-zero when any of three independent conditions occur -- a live required check would be dropped by the next apply (drift), a repo/branch simply couldn't be read (e.g. a degraded token), or \`checks_for()\` declares a check that isn't live yet (pending an apply). This issue does not distinguish which -- read the output below (drift lines start \`!! DRIFT:\`, pending-apply lines start \`!! PENDING:\`, unreadable-repo lines are the remaining \`!!\` lines)."
+            echo
+            echo "Run: $RUN_URL"
+            echo
+            echo '```'
+            cat drift-check-output.txt
+            echo '```'
+            echo
+            echo "**About the \`!! PENDING:\` lines specifically:** someone edited \`checks_for()\` in \`scripts/standardize.sh\` to declare a new required check -- e.g. Phase 2 added \`acdp-verifier-py\`'s \`conformance + tests + types (3.14)\` and \`acdp-playground\`'s \`docker image builds\` -- without anyone having run an apply since. This is expected right after such an edit, and is exactly what a post-merge apply runbook is for; it is not, by itself, evidence of anything wrong. It only becomes a problem if it sits here indefinitely, which is the whole reason this workflow reports it instead of staying silent."
+            echo
+            echo "**Known blind spot:** this check only compares *declared* required checks (\`checks_for()\` in \`scripts/standardize.sh\`) against what's *live* in branch protection. It cannot see a real PR gate -- a check-run some repo's CI actually produces -- that was never added to protection as a required check in the first place. A green/silent run of this workflow means \"nothing declared has drifted or is pending,\" not \"every real gate is required.\" Finding that gap means comparing \`checks_for()\` against each repo's CI workflow by hand."
+            echo
+            echo "**Remedy:** run \`./scripts/standardize.sh <repo>\` (no \`--check\`) locally with \`gh auth\` admin:org for the affected repo (or with no repo argument to apply to every managed repo), after reconciling \`checks_for()\` with what should be live -- see the script's header comment for the drift guard and \`--allow-check-removal\`. For a pending-apply-only issue (no drift), the apply is expected to complete without needing \`--allow-check-removal\`."
+          } > drift-check-body.md
+
+          existing=$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file drift-check-body.md
+          else
+            gh issue create --title "standardize.sh --check: drift, unreadable repo, or pending-apply check detected" \
+              --label "$LABEL" \
+              --body-file drift-check-body.md
+          fi
