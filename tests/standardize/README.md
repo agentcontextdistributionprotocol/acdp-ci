@@ -154,3 +154,51 @@ a 3.2 incompatibility mechanically rather than relying on code review alone.
 Banned constructs: `declare -A`, `local -n`/`declare -n`, `mapfile`/
 `readarray`, `${var^^}`/`${var,,}`, `[[ -v ]]`, `&>>`. (`${var//pat/rep}` *is*
 valid in bash 3.2 and is used freely.)
+
+## `mutants.sh` — proving the assertions still bite
+
+`run.sh` proves `standardize.sh` behaves correctly. It cannot prove its own
+assertions would *notice* if `standardize.sh` stopped behaving correctly. A
+test that passes with the bug injected is worth nothing, and from the outside
+it is indistinguishable from one that works — green either way.
+
+`./tests/standardize/mutants.sh` injects four known bugs and requires the
+suite to fail on each:
+
+| mutant | assertions that catch it |
+|---|---|
+| drift detection disabled (`extras` always empty) | 4 |
+| fail-closed jq replaced by the B4 `// []` defaulting | 5 |
+| wholly-failed survey downgraded from fatal (2) to finding (1) | 2 |
+| partial failure over-escalated to fatal | 1 |
+
+Two of those counts come from assertions that a mutating call actually reached
+the `gh` stub — the strongest available form, since they prove the destructive
+PUT happens rather than merely that an exit code changed.
+
+**The trap this harness is built around.** A mutation that fails to apply runs
+the suite against unmodified code, sees zero failures, and reports "not
+caught" — identical output to a genuinely missed bug, and wrong in the more
+alarming direction. Every substitution therefore asserts it matched exactly
+once, and an unapplied mutant exits 2 as a hard error rather than producing a
+result. This is not hypothetical: it happened three times while writing this
+file, each time reading as a clean pass.
+
+Same reason the fourth mutant exists at all. The third pins "a run that
+learned nothing must not look like a finding"; the fourth pins the opposite
+direction, that a *partial* failure must stay a finding. Pinning only one side
+lets exit 1 and 2 collapse back together later, which is the failure being
+guarded — an assertion of merely "non-zero" would accept either.
+
+**Writing a new mutant.** Anchor on text unique enough to match exactly once,
+and substitute the *whole* expression a guard depends on, not one branch of
+it. Disabling a single `elif` in the fail-closed jq is not the B4 bug: the
+next branch still rejects the same fixture (`null|type` is `"null"`, not
+`"array"`), so the guard holds and the mutant proves nothing while appearing
+to pass. That mistake initially reported 22 kills instead of the true 5,
+because the crude splice broke jq outright — a trivially-caught mutant wearing
+the costume of a subtle one.
+
+Not wired into CI: this repo produces no check-runs on its own PRs, and the
+harness rewrites `scripts/standardize.sh` in place (restored via `trap`, and
+on abort). Run it by hand when changing a guard or an assertion around one.
