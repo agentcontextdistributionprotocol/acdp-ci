@@ -496,6 +496,17 @@ for repo in $repos; do
     continue
   fi
 
+  # Named window (not a blocked apply — the drift guard above already
+  # covers that case): if this PATCH succeeds and the PUT below then fails,
+  # `set -e` aborts the script leaving allow_auto_merge=true applied on a
+  # repo whose branch protection was NOT updated to match. Not closed here
+  # — swapping the call order would just trade it for the opposite gap
+  # (protection updated, auto-merge flag stale) — but contained: the CI-6
+  # guards in auto-merge.yml and bump-consume.yml both refuse to arm
+  # auto-merge on a branch without a live required status check, so a repo
+  # caught in this window can't actually auto-merge unsupervised, and
+  # `apply` (no --check) is a supervised manual operation, not something
+  # that runs unattended.
   gh api -X PATCH "repos/$ORG/$repo" \
     -F allow_auto_merge="$auto_merge" -F allow_squash_merge=true -F delete_branch_on_merge=true \
     --jq '"  auto-merge=\(.allow_auto_merge) squash=\(.allow_squash_merge) delete-branch=\(.delete_branch_on_merge)"'

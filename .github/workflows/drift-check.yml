@@ -27,10 +27,15 @@ name: drift-check
 #     ACDP_BOT_PRIVATE_KEY), minted with ONLY `permission-contents: read`
 #     and scoped org-wide via `owner:` -- this is what standardize.sh
 #     --check needs to `gh api` every managed repo's branch summary.
-#     GITHUB_TOKEN cannot reach that: the managed siblings are public, so
-#     GITHUB_TOKEN can read their contents, but it has no visibility into
-#     the `.protection` block standardize.sh --check actually needs, which
-#     requires the App's cross-repo installation scope.
+#     GITHUB_TOKEN would in fact suffice for this READ today: every managed
+#     repo is public, and `.protection` (including
+#     `required_status_checks.contexts`) is readable even unauthenticated --
+#     verified live against acdp-registry-rs. The App token is used
+#     deliberately anyway, so the survey keeps working unchanged if a
+#     managed repo is ever made private in the future, the way acdp-website
+#     already is -- which is precisely why acdp-website is excluded from the
+#     managed set. GITHUB_TOKEN here is scoped to acdp-ci alone and could
+#     never read a private sibling; the App's org-wide installation can.
 #   - GITHUB_TOKEN, for filing/commenting the tracking issue in *this*
 #     repo. The acdp-deps-bot App has no Issues permission (see
 #     DELIVERY-STANDARD.md's credential table: Contents, Pull requests,
@@ -38,6 +43,17 @@ name: drift-check
 #     credential model here is "zero PATs," and adding a new App grant for
 #     this alone is out of scope.
 # Neither token can do the other's half of the job.
+#
+# Runbook safety note: live_contexts treats protected:true with an ABSENT
+# required_status_checks key as unreadable. That's the exact state the
+# post-merge apply runbook creates on acdp-ci/.github themselves --
+# protection applied with zero required checks -- and it has never been
+# observed live. Evidence suggests it's fine (even unprotected repos return
+# the key, with enforcement_level:"off"), but if that's wrong, this weekly
+# job would file an "unreadable repo" issue for those two repos forever.
+# After first applying protection to a zero-check repo, run
+# `./scripts/standardize.sh --check` once by hand before relying on this
+# schedule to catch problems.
 
 on:
   schedule:

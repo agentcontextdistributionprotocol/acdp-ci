@@ -96,10 +96,15 @@ recommending agent's analysis, the human's verdict, and the resulting status.
   are pinned to the feature branch and will 404 once it's deleted post-merge.
 - **Verdict:** confirm as-is; fix both flagged defects now/at-merge rather
   than deferring either.
-- **Status:** CONFIRMED. `DELIVERY-STANDARD.md:227` reworded in this PR to
-  name `acdp-control-plane` as the one tracked exception, citing #123.
-  Follow-up (not blocking): repoint issue #123's blob-URL links from this
-  feature branch to `main` immediately after this PR merges.
+- **Status:** CONFIRMED. At the time of this decision (2026-08-29),
+  `DELIVERY-STANDARD.md`'s CI baseline section was reworded to name
+  `acdp-control-plane` as the one tracked exception, citing #123. **That
+  exception no longer holds, and the doc no longer says it**: #123 closed
+  2026-08-30 with the alias removed from `package.json`, and the CI baseline
+  section now reads "every code-shipping repo meets this baseline in full" —
+  see the SUPERSEDES entry below. Follow-up (not blocking): repoint issue
+  #123's blob-URL links from this feature branch to `main` immediately after
+  this PR merges.
 
 ## 2026-09-05 — `checkout-spec` action pinning: SHA mandated, not merely recommended
 
@@ -122,7 +127,7 @@ enforce a preference.
 **Verdict: CHANGE — mandate SHA + `# v1`.** Applied: the ruling, and every copy-paste site
 (`DELIVERY-STANDARD.md` prose + adoption snippet, `README.md` snippet + conventions line, and
 `actions/checkout-spec/README.md`, which the recommender's own list missed). `grep -rn
-"checkout-spec@v1"` now returns zero hits repo-wide.
+"checkout-spec@" + "v1"` now returns zero hits repo-wide outside this entry.
 
 **Rejected from the recommendation:** its claim that "acdp-ci SHA-pins nothing" and that the
 doc's third-party/`actions/*` risk-grading analogy is therefore unfounded. Verified false —
@@ -195,3 +200,20 @@ rulesets are not a workaround.
 
 **Status:** CONFIRMED (2026-09-05). The 2026-08-29 entry stands as the record of what was
 decided then; this entry records what replaced it and why.
+
+## 2026-09-05 — SUPERSEDES: `acdp-control-plane#123` closed, alias removed
+
+The 2026-08-29 entry above ("CI-4's acceptance bar: document + track, don't block on
+cross-repo fix") recorded live state as of that date: "the alias is still present at
+`acdp-control-plane/package.json:35`, issue #123 is open."
+
+That is now superseded. `acdp-control-plane#123` closed 2026-08-30, and the `npm:` alias
+has been removed from `acdp-control-plane/package.json` on `origin/main` (both verified
+live). `DELIVERY-STANDARD.md`'s CI baseline section no longer names `acdp-control-plane`
+as a tracked exception to the no-alias row — it now states every code-shipping repo meets
+the baseline in full (the paragraph beginning "As of 2026-09-05" in the CI baseline
+section).
+
+**Status:** CONFIRMED (2026-09-05). The 2026-08-29 entry stands as the record of what was
+true then; this entry records what replaced it, so a future reader doesn't act on the
+stale "#123 is open" line.

@@ -19,13 +19,23 @@ registry credential:
 
 ### Provenance is attestation-anchored, not publish-anchored
 
-The invariant a consumer bump relies on: **a consumer bump requires a
-published artifact carrying a verifiable provenance attestation binding it
-to a commit, plus a release tag at that commit.** The attestation, not a
-`gitHead` field in the published manifest, is the actual proof — `gitHead` is
-self-asserted metadata the publish tooling writes, not something an outside
-party can verify. A reader verifies an artifact with
-`gh attestation verify <file> --repo <owner>/acdp-rs`.
+The invariant a consumer bump relies on, for the npm and PyPI **binding**
+packages: **a consumer bump requires a published artifact carrying a
+verifiable provenance attestation binding it to a commit, plus a release tag
+at that commit.** The attestation, not a `gitHead` field in the published
+manifest, is the actual proof — `gitHead` is self-asserted metadata the
+publish tooling writes, not something an outside party can verify. A reader
+verifies an artifact with `gh attestation verify <file> --repo
+<owner>/acdp-rs`.
+
+**Exception: the `acdp` crate has no attestation mechanism today.**
+`release-plz.yml:16-24` (in `acdp-rs`) states plainly that `cargo publish`
+"has no build-provenance / attestation mechanism comparable to npm
+`--provenance` or PyPI attestations", with crates.io Trusted Publishing
+tracked as the follow-up that would close this gap. `acdp` is a real
+consumer-bump path — `acdp-registry-rs` bumps it via `bump-consume.yml@v1`
+with `ecosystem: cargo` — so a cargo consumer bump is anchored by the
+release-plz tag alone, not by an attestation.
 
 All three of `acdp-rs`'s binding-release workflows — `bindings-release.yml`
 (npm), `acdp-py-release.yml` (PyPI wheels), and `acdp-wasm-release.yml`
@@ -47,8 +57,9 @@ same `attest-build-provenance@v4` step per-artifact under the equivalent
 permissions (`:50-51`/`:91` for wheels, `:105-106`/`:121` for the sdist) and
 its separate `publish` job uploads PEP 740 attestations to PyPI via
 `pypa/gh-action-pypi-publish` (`attestations: true`, OIDC `id-token: write`
-at `:165`). So every real publish — tag-triggered or dispatched — carries a
-verifiable provenance attestation as well as a tag.
+at `:165`). So every real **binding** publish — tag-triggered or dispatched —
+carries a verifiable provenance attestation as well as a tag; the `acdp`
+crate publish is the one exception, above.
 
 **Limit: these builds are not bit-reproducible**, so the guarantee above rests
 on the attestation, not on independent rebuilding. `acdp-wasm-release.yml`
@@ -62,13 +73,18 @@ reproducibility.
 
 `bump-consume.yml` (in this repo) only *propagates* whatever a registry
 actually serves — it has no way to independently confirm the attestation on
-a consumer's behalf. What actually distinguishes a trustworthy release from
-one that isn't is the presence of a valid provenance attestation binding the
-published artifact to a commit, plus a tag at that commit — not which
-trigger (`push` vs. `workflow_dispatch`) produced it, since a non-dry-run
-dispatch produces both. A `dry_run: true` dispatch is the one case that
-produces neither a tag nor a publish, and should never be treated as a real
-release.
+a consumer's behalf. For the npm and PyPI **binding** packages, what
+actually distinguishes a trustworthy release from one that isn't is the
+presence of a valid provenance attestation binding the published artifact to
+a commit, plus a tag at that commit — not which trigger (`push` vs.
+`workflow_dispatch`) produced it, since a non-dry-run dispatch of those three
+binding-release workflows produces both. A `dry_run: true` dispatch of those
+workflows is the one case that produces neither a tag nor a publish, and
+should never be treated as a real release. The `acdp` crate is the exception
+already noted above: its `release-plz.yml` publish is push-triggered only
+(unlike the three binding-release workflows, it has no `workflow_dispatch` /
+dry-run mode) and carries no attestation, so a cargo consumer bump is
+anchored by the release-plz tag alone, not by an attestation.
 
 ## Propagation graph
 
@@ -147,9 +163,12 @@ which is strictly cheaper than teaching Dependabot's alias handling (not
 A one-time, read-only sweep of every npm-consuming sibling repo
 (`acdp-ui-console`, `acdp-website`, `acdp-control-plane`) is recorded in
 `PROGRESS.md`'s "npm-alias sweep (Phase 2, CI-4)" section —
-`acdp-control-plane` still has this violation as its sole declaration of the
-family SDK, tracked via a filed issue and
-`plans/cross-repo/acdp-control-plane-dealias-acdp.md`, not fixed from here.
+`acdp-control-plane` had this violation as its sole declaration of the
+family SDK at sweep time, tracked via
+[acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123)
+and `plans/cross-repo/acdp-control-plane-dealias-acdp.md`. As of 2026-09-05
+the alias has been removed and #123 is closed (see the CI baseline section
+below) — kept here as the historical sweep record, not a live violation.
 This rule is a standing statement of intent, not an enforced CI gate — nothing
 here catches a *new* alias added after this rule ships (see Long-term posture
 in the CI-4 plan).
@@ -332,11 +351,13 @@ This bar applies to every repo that ships code — see the Repo matrix below.
 application code (`acdp-ci` is CI/CD YAML + docs with zero check-runs on its
 own PRs; `.github` has no `.github/workflows/` at all), so `standardize.sh`
 manages them protection-only, with no required checks to configure.
-**One real, tracked exception among the code-shipping repos**:
-`acdp-control-plane` doesn't yet meet the no-alias row above — tracked as
-[acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123),
-not silently compliant. Every other code-shipping repo meets this baseline in
-full.
+**As of 2026-09-05, every code-shipping repo meets this baseline in full.**
+`acdp-control-plane` was the one tracked exception to the no-alias row above
+— tracked as
+[acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123)
+— but the alias has since been removed from its `package.json` and #123 is
+closed, verified live against `origin/main`. No code-shipping repo currently
+carries an npm alias for a family package.
 
 `auto-merge.yml` and `bump-consume.yml` both now enforce this baseline
 themselves: `auto-merge.yml` hard-fails (rather than silently completing) on a
@@ -388,6 +409,18 @@ nothing about the caller's `permissions:` block. Where the callee mints no
 App token of its own and instead runs on the caller's own `GITHUB_TOKEN`
 (`auto-merge.yml`), that caller-side `permissions:` block stays load-bearing
 and must not be trimmed by analogy with this rule.
+
+**Adoption status (verified live, 2026-09-05): zero of six conforms.** All
+six live callers of these reusable workflows still use `secrets: inherit`:
+`acdp-control-plane/bump-acdp.yml`, `acdp-registry-rs/bump-acdp.yml`,
+`acdp-registry-rs/bump-spec.yml`, `acdp-playground/bump-acdp.yml`,
+`acdp-verifier-py/bump-spec.yml`, `acdp-rs/bump-spec.yml`. The org's
+`.github` workflow-templates already use the explicit named-secrets shape,
+so a repo newly adopting a template gets this right from the start — it is
+only these six pre-existing callers that haven't migrated. This is a
+tracked gap, not silently compliant: migration is
+[acdp-ci#13](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/13),
+and each fix is a 3-line caller edit requiring no `acdp-ci` change.
 
 **The `acdp-deps-bot` App's `Workflows: Read/write` is org-wide** — it can push to
 `.github/workflows/**` in every repo it's installed in, `acdp-ci` included. That
