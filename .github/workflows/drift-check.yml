@@ -128,9 +128,14 @@ jobs:
           set -euo pipefail
           LABEL=drift-check
 
+          # GitHub caps a label description at 100 characters and rejects a
+          # longer one with a 422 -- which, under `set -e`, kills this step
+          # before the issue is ever filed. That is the worst possible failure
+          # for this workflow: --check would correctly detect drift and then
+          # have no way to tell anyone. Keep the line below under 100 chars.
           gh label create "$LABEL" \
             --color B60205 \
-            --description "Automated: branch-protection drift, an unreadable repo, or a declared check not yet applied, found by standardize.sh --check" \
+            --description "Automated: protection drift, unreadable repo, or not-yet-applied check (standardize.sh --check)" \
             --force >/dev/null
 
           {
