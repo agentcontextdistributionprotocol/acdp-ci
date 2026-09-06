@@ -30,6 +30,15 @@ pass() {
 fail() {
   fail_count=$((fail_count + 1))
   echo "FAIL: $1 -- $2"
+  # Exact name on a side channel for mutants.sh. Parsing it back out of the
+  # line above is not safe: three test names legitimately contain " -- "
+  # (the `G4: --check -- <typo'd repo>` cases), so a split on that separator
+  # silently truncates them to "G4: --check" and merges three distinct tests
+  # into one. A killer-set comparison built on that would be quietly wrong in
+  # both directions. Unset in normal runs; nothing is written.
+  if [ -n "${FAILNAME_LOG:-}" ]; then
+    printf '%s\n' "$1" >> "$FAILNAME_LOG"
+  fi
 }
 
 new_log() {
