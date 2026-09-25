@@ -127,6 +127,13 @@ jobs:
         run: |
           set -euo pipefail
           LABEL=drift-check
+          # Bound once, used for both the lookup below and the `gh issue create --title`
+          # call, so the two can never diverge. Before this, the lookup matched on the
+          # label ALONE -- any other open issue carrying the same label (e.g. a manually
+          # filed, unrelated design-gap issue) silently absorbed a drift comment instead
+          # of the dedicated tracking issue ever being created or updated. See acdp-ci#19
+          # for the incident this fixes.
+          TITLE="standardize.sh --check: drift, unreadable repo, or pending-apply check detected"
 
           # GitHub caps a label description at 100 characters and rejects a
           # longer one with a 422 -- which, under `set -e`, kills this step
@@ -156,11 +163,12 @@ jobs:
             echo "**Remedy:** run \`./scripts/standardize.sh <repo>\` (no \`--check\`) locally with \`gh auth\` admin:org for the affected repo (or with no repo argument to apply to every managed repo), after reconciling \`checks_for()\` with what should be live -- see the script's header comment for the drift guard and \`--allow-check-removal\`. For a pending-apply-only issue (no drift), the apply is expected to complete without needing \`--allow-check-removal\`."
           } > drift-check-body.md
 
-          existing=$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')
+          existing=$(gh issue list --state open --label "$LABEL" --json number,title \
+            | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)][0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body-file drift-check-body.md
           else
-            gh issue create --title "standardize.sh --check: drift, unreadable repo, or pending-apply check detected" \
+            gh issue create --title "$TITLE" \
               --label "$LABEL" \
               --body-file drift-check-body.md
           fi
