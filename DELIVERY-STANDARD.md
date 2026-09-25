@@ -143,13 +143,14 @@ no `bump-acdp`:
 - **acdp-website** — Vercel deploy, no family SDK dependency.
 
 `acdp-ui-console` is *not* in this list: `package.json:22` depends on
-`@agentcontextdistributionprotocol/acdp-wasm` (`^0.14.1` as of 2026-09-24, current —
-`acdp-wasm-release.yml` has no dispatch step at all, so this pin can only ever move via
-Dependabot, and evidently has). It has no `bump-acdp.yml` and does not currently receive
-`acdp-released` dispatches — Dependabot's `npm` group is its only update path for that
-dependency today. Whether it should get the same dispatch-driven `bump-acdp` automation
-as the other consumers is tracked in
-`acdp-ui-console#70`, not decided here.
+`@agentcontextdistributionprotocol/acdp-wasm` (`^0.8.5` on `main` as of 2026-09-24, npm
+`latest` is `0.14.1` — six minors behind, the same shape as the `acdp-playground`/
+`acdp-control-plane` staleness above). `acdp-wasm-release.yml` has no dispatch step at
+all, so Dependabot's `npm` group is this pin's *only* update path, not a fallback for a
+missed dispatch — and that sole path evidently hasn't caught it either. It has no
+`bump-acdp.yml` and does not currently receive `acdp-released` dispatches. Whether it
+should get the same dispatch-driven `bump-acdp` automation as the other consumers is
+tracked in `acdp-ui-console#70`, not decided here.
 
 ## Propagation mechanics
 
