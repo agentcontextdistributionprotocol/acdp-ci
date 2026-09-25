@@ -1,5 +1,13 @@
 # acdp-control-plane: remove the remaining npm alias for `acdp`
 
+**Status: historical record, not a live task.** The violation this file describes was
+fixed and its tracking issue closed on 2026-09-05
+(`agentcontextdistributionprotocol/acdp-control-plane#123`) — confirmed live: the alias
+is gone from `acdp-control-plane/package.json` on `main`. This file is kept as the sweep
+record `DELIVERY-STANDARD.md`'s npm-alias section points to, per that doc's own framing
+("kept here as the historical sweep record, not a live violation") — not as open work for
+anyone to pick up.
+
 Written from `acdp-ci` as part of
 `plans/ci-wave-t4t5-provenance-npm-alias-automerge-scoping.md` (Phase 2, CI-4).
 This repo (`acdp-ci`) never edits `acdp-control-plane` directly — this file is

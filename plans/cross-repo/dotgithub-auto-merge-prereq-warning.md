@@ -1,13 +1,22 @@
 # dotgithub: prerequisite warning on the auto-merge workflow template
 
+**Status: historical record, not a live task.** The target repo is
+`agentcontextdistributionprotocol/.github` (its own filename can't start with a literal
+`.`, hence this file's `dotgithub` name — every in-repo reference below is corrected to
+the real slug). The issue this file was written for,
+`agentcontextdistributionprotocol/.github#4`, is closed (2026-08-30); confirmed the
+prerequisite warning already exists in `.github/workflow-templates/auto-merge.yml` on
+`main`. Kept as the sweep record, per the same convention as
+`plans/cross-repo/acdp-control-plane-dealias-acdp.md`.
+
 Written from `acdp-ci` as part of
 `plans/ci-wave-t4t5-provenance-npm-alias-automerge-scoping.md` (Phase 3, CI-6).
-This repo (`acdp-ci`) never edits `dotgithub` directly — this file is the tracked
-plan; a GitHub issue in `agentcontextdistributionprotocol/dotgithub` links here.
+This repo (`acdp-ci`) never edits `.github` directly — this file is the tracked
+plan; a GitHub issue in `agentcontextdistributionprotocol/.github` links here.
 
 ## Why
 
-`dotgithub/workflow-templates/auto-merge.yml` is a one-click-adoptable GitHub
+`.github/workflow-templates/auto-merge.yml` is a one-click-adoptable GitHub
 repository-template workflow that calls
 `agentcontextdistributionprotocol/acdp-ci/.github/workflows/auto-merge.yml@v1`.
 As of the referencing PR, that reusable workflow gained a hard guard (its own
@@ -46,12 +55,12 @@ final and merged.
 
 ## Files
 
-- `dotgithub/workflow-templates/auto-merge.yml`
-- `dotgithub/workflow-templates/auto-merge.properties.json`
+- `.github/workflow-templates/auto-merge.yml`
+- `.github/workflow-templates/auto-merge.properties.json`
 
 ## Approach
 
-Text-only change, no workflow logic in `dotgithub` itself (this repo never runs
+Text-only change, no workflow logic in `.github` itself (this repo never runs
 the reusable workflow — it only hosts the template that other repos copy from).
 Match the wording to whatever `acdp-ci/.github/workflows/auto-merge.yml`'s guard
 step actually prints in its `::error::` message, so a user who ignores the header

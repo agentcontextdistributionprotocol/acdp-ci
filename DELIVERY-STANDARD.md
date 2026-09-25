@@ -129,7 +129,10 @@ covers `acdp` — direct evidence for that group's own "rarely proposes updates 
 dep" caveat above; its own safety net did not, in fact, save it. Both halves are open,
 independently filed issues —
 [acdp-rs#302](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/302)
-(npm/`bindings-release.yml`, with a full fix plan already linked from it) and
+(npm/`bindings-release.yml`; the issue links a full fix plan in `acdp-control-plane`, but
+that plan file is currently uncommitted there — same bare `plans/` gitignore pattern this
+repo just fixed in its own `.gitignore` — so the link 404s; see
+`plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how it was actually read) and
 [acdp-rs#304](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/304)
 (PyPI/`acdp-py-release.yml`) — see
 `plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how they relate and one gap in
