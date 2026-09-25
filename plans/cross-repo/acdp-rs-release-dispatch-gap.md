@@ -34,8 +34,17 @@ in `acdp-rs`.
 - `agentcontextdistributionprotocol/acdp-rs#302` — open issue, npm half
   (`bindings-release.yml`). Not touched by this note; described below.
 - `agentcontextdistributionprotocol/acdp-control-plane/plans/cross-repo/acdp-rs-bump-dispatch-fix.md`
-  — the actual fix plan for the `#302` half, already written, already tracked by `#302`.
-  Read directly, not reproduced here.
+  — the actual fix plan for the `#302` half, already written. **The link `#302` itself
+  gives for this file 404s** — confirmed via `gh api .../acdp-control-plane/contents/plans/...`
+  (Not Found) and a full recursive tree of that repo's `main` (no `plans/` path at all).
+  Cause: `acdp-control-plane/.gitignore` still has the bare `plans/` pattern — the exact
+  bug this PR fixed in `acdp-ci`'s own `.gitignore` (`plans/` → `plans/*` +
+  `!plans/cross-repo/`). The file exists uncommitted on the local checkout at
+  `../acdp-control-plane/plans/cross-repo/acdp-rs-bump-dispatch-fix.md` in this workspace,
+  which is how its content below was actually read — not the dead URL. This is a real gap
+  in `#302`, owned by `acdp-control-plane`/`acdp-rs`, not something this note fixes; noted
+  here so whoever next reads `#302` doesn't burn time on a 404 the way this session almost
+  did.
 
 ## Approach
 
@@ -67,7 +76,10 @@ session:**
   otherwise, reject anything that isn't plain semver, *then* widen the `if:` to the
   predicate the workflow's own publish step already uses
   (`${{ always() && (github.event_name == 'push' || !inputs.dry_run) }}`), and move the
-  dispatch after the tag-creation step. That plan is complete and needs no addition here.
+  dispatch after the tag-creation step. That plan's *content* is complete and needs no
+  addition here — but the URL `#302` links to it is currently dead (see `## Files`
+  above); whoever picks up `#302` should also fix that before relying on the issue alone
+  to hand it off.
 
 - **`acdp-rs#304`** (PyPI/acdp-py-release.yml) does **not** carry the same care.
   Its "Suggested fix" is "drop the `github.event_name == 'push'` guard (or broaden it) …
