@@ -186,12 +186,12 @@ directly with the inline pin shape (a raw `actions/checkout` step against
 the spec repo, with an explicit 40-hex `ref:`). Adoption of a new SHA is
 always a reviewed PR, never auto-merged (below).
 
-Snapshot, verified against each repo's `origin/main` (2026-09-05):
-`acdp-verifier-py` (`ci.yml:35`) has adopted the composite action.
-`acdp-rs` (`ci.yml:68-76`) and `acdp-registry-rs` satisfy the pinning rule
-using the inline pin shape instead — neither has adopted the action. All
-three repos pin at a 40-hex SHA today; only the mechanism differs, and this
-snapshot will drift as more repos migrate onto the composite action.
+Snapshot, verified against each repo's `origin/main` (2026-09-24):
+`acdp-verifier-py` (`ci.yml:35`) and `acdp-registry-rs` (`ci.yml:580`, and also
+`mutants.yml:378` — adopted via PR #155) have both adopted the composite action.
+`acdp-rs` (`ci.yml:68-76`) still satisfies the pinning rule using the inline pin
+shape. All three repos pin at a 40-hex SHA today; only the mechanism differs, and
+this snapshot will drift as more repos migrate onto the composite action.
 
 Adopting the action buys two guards the inline shape doesn't have: it
 verifies the `ref:` input is 40 hex characters before checking anything out
@@ -410,34 +410,24 @@ App token of its own and instead runs on the caller's own `GITHUB_TOKEN`
 (`auto-merge.yml`), that caller-side `permissions:` block stays load-bearing
 and must not be trimmed by analogy with this rule.
 
-**Adoption status — a dated snapshot, not a live figure. Re-read the source
-before citing it.** As of 2026-09-06, verified against each repo's default
-branch through the contents API, three of six call sites conform:
+**Adoption status — resolved.** As of 2026-09-24, verified against each repo's
+default branch through the contents API, all six reusable-workflow call sites
+(`acdp-control-plane/bump-acdp.yml`, `acdp-playground/bump-acdp.yml`,
+`acdp-verifier-py/bump-spec.yml`, `acdp-rs/bump-spec.yml`,
+`acdp-registry-rs/bump-acdp.yml`, `acdp-registry-rs/bump-spec.yml`) pass secrets
+explicitly, matching the rule above. This was zero of six when the rule was first
+written on 2026-08-29 and three of six as of 2026-09-06 — the other three
+migrations landed in the callers' own repos, with no `acdp-ci` change involved.
+[acdp-ci#13](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/13),
+`acdp-rs#199`, and `acdp-registry-rs#144` — the tracking issue and the two
+per-repo caller issues it linked — are all closed.
 
-| call site | shape |
-|---|---|
-| `acdp-control-plane/bump-acdp.yml` | explicit |
-| `acdp-playground/bump-acdp.yml` | explicit |
-| `acdp-verifier-py/bump-spec.yml` | explicit |
-| `acdp-rs/bump-spec.yml` | `inherit` |
-| `acdp-registry-rs/bump-acdp.yml` | `inherit` |
-| `acdp-registry-rs/bump-spec.yml` | `inherit` |
-
-This was zero of six when the rule was first written on 2026-08-29; the
-three migrations landed in the callers' own repos, with no `acdp-ci` change
-involved, which is precisely why a number written down here goes stale
-without anything in this repo changing. **The live source of truth is
-[acdp-ci#13](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/13)
-and the per-repo caller issues it links** — `acdp-rs#199` and
-`acdp-registry-rs#144` are the two still open, and they correspond exactly
-to the three remaining `inherit` sites above. Prefer reading those over
-trusting this table.
-
-The org's `.github` workflow-templates already use the explicit named-secrets
-shape, so a repo newly adopting a template gets this right from the start.
-Fixing a template does nothing for a repo that already copied the old shape,
-though — the remaining three are pre-existing callers, and each fix is a
-3-line caller edit requiring no `acdp-ci` change.
+This was a point-in-time migration, not an enforced invariant: nothing checks a
+*new* reusable-workflow caller against this rule (see below), so a future caller
+added with `secrets: inherit` won't be caught by anything but review. The org's
+`.github` workflow-templates already use the explicit named-secrets shape, so a
+repo newly adopting a template gets this right from the start — that doesn't
+help a repo that copies an older shape by hand instead of from a template.
 
 Nothing automated checks this. `drift-check.yml` compares declared required
 status checks against live branch protection; it has no visibility into
@@ -595,9 +585,9 @@ automatic, audit-logged bypass; rollback is one DELETE.
 | Repo | Lang | CI caller | auto-merge | Dependabot | bump-acdp | Publish | Graph role |
 |---|---|---|---|---|---|---|---|
 | acdp-rs | Rust | own ci | ✅ | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / sends 3 dispatches** |
-| acdp-registry-rs | Rust | own ci | add | cargo+docker+ga | cargo | Docker + crate | consumes crate |
+| acdp-registry-rs | Rust | own ci | ✅ | cargo+ga | cargo | Docker + crate | consumes crate |
 | acdp-control-plane | npm | own ci | ✅ | npm+docker+ga | npm | Docker | consumes npm |
-| acdp-playground | Python/uv | own ci | add | uv+docker+ga | uv | Docker | consumes py |
+| acdp-playground | Python/uv | own ci | ✅ | uv+ga | uv | Docker | consumes py |
 | acdp-verifier-py | Python | own ci | add | pip+ga | — | — | independent |
 | acdp-ui-console | TS | own ci | add | npm+ga | — | Vercel | consumes wasm (Dependabot only, no dispatch — acdp-ui-console#70) |
 | acdp-website | MDX | own ci | add | npm+ga | — | Vercel | leaf |
