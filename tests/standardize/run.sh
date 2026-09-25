@@ -94,7 +94,7 @@ assert_zero_mutations "$LOG" "registry-rs-drift: fixture-serving is read-only"
 FX="$FIXTURES_ROOT/registry-rs-insync"
 LOG="$(new_log)"
 n="$(FIXTURES="$FX" GH_LOG="$LOG" gh api "repos/$ORG/acdp-registry-rs/branches/main" --jq '.protection.required_status_checks.contexts | length')"
-[ "$n" = "4" ] && pass "registry-rs-insync: fixture serves 4 contexts" || fail "registry-rs-insync: fixture serves 4 contexts" "got '$n'"
+[ "$n" = "6" ] && pass "registry-rs-insync: fixture serves 6 contexts" || fail "registry-rs-insync: fixture serves 6 contexts" "got '$n'"
 assert_zero_mutations "$LOG" "registry-rs-insync: fixture-serving is read-only"
 
 # --- 3. control-plane-reorder: same 3 checks, different order (false-positive trap) ---
@@ -212,7 +212,7 @@ fi
 echo
 echo "== Phase 2: checks_for() corrections + drift guard (full-script) =="
 
-# --- case 2: registry-rs post-fix -> exit 0, "in sync", PUT keeps all 4 ---
+# --- case 2: registry-rs post-fix -> exit 0, "in sync", PUT keeps every declared check ---
 FX="$FIXTURES_ROOT/registry-rs-insync"
 LOG="$(new_log)"
 out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs 2>&1)"
@@ -224,10 +224,10 @@ else
 fi
 put_body="$(awk '/^gh api -X PUT/{getline; if ($0 ~ /^STDIN: /) { sub(/^STDIN: /, ""); print; exit }}' "$LOG")"
 put_contexts="$(printf '%s' "$put_body" | jq -c '.required_status_checks.contexts // empty' 2>/dev/null)"
-if [ "$put_contexts" = '["rustfmt","clippy","tests","conformance (spec fixtures)"]' ]; then
-  pass "case2: PUT body carries all 4 declared checks, including conformance (spec fixtures)"
+if [ "$put_contexts" = '["rustfmt","clippy","tests","conformance (spec fixtures)","cargo-deny","lint"]' ]; then
+  pass "case2: PUT body carries all 6 declared checks, including cargo-deny and lint"
 else
-  fail "case2: PUT body carries all 4 declared checks" "got '$put_contexts'"
+  fail "case2: PUT body carries all 6 declared checks" "got '$put_contexts'"
 fi
 
 # --- case 3: control-plane-reorder -> exit 0 (false-positive regression test) ---
@@ -313,7 +313,7 @@ assert_zero_mutations "$LOG" "case10: api-failure -> no -X in GH_LOG"
 
 # --- case 1: registry-rs pre-fix-style drift, reproduced against a SCRATCH
 #     fixture (not a reversion of the checks_for() fix): the now-corrected
-#     4-check table still doesn't know about a hypothetical 5th live check.
+#     6-check table still doesn't know about a hypothetical 7th live check.
 #     Apply mode must block before any mutation and name the dropped check. ---
 SCRATCH_5TH="$(mktemp -d)"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" "$SCRATCH_5TH/"
@@ -345,7 +345,7 @@ else
 fi
 put_body="$(awk '/^gh api -X PUT/{getline; if ($0 ~ /^STDIN: /) { sub(/^STDIN: /, ""); print; exit }}' "$LOG")"
 put_contexts="$(printf '%s' "$put_body" | jq -c '.required_status_checks.contexts // empty' 2>/dev/null)"
-if [ "$put_contexts" = '["rustfmt","clippy","tests","conformance (spec fixtures)"]' ]; then
+if [ "$put_contexts" = '["rustfmt","clippy","tests","conformance (spec fixtures)","cargo-deny","lint"]' ]; then
   pass "override: PUT body reaches the mutation path with the reduced (declared-only) contexts"
 else
   fail "override: PUT body reaches the mutation path with the reduced (declared-only) contexts" "got '$put_contexts'"
@@ -505,7 +505,7 @@ write_unprotected_fixture() {
 
 SWEEP_FX="$(mktemp -d)"
 write_insync_fixture "$SWEEP_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
-write_insync_fixture "$SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)"
+write_insync_fixture "$SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint"
 write_insync_fixture "$SWEEP_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
 write_insync_fixture "$SWEEP_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
 write_insync_fixture "$SWEEP_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
@@ -548,7 +548,7 @@ rm -rf "$SWEEP_FX"
 #     must still exit 0 exactly as before this fix. ---
 CLEAN_SWEEP_FX="$(mktemp -d)"
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
-write_insync_fixture "$CLEAN_SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)"
+write_insync_fixture "$CLEAN_SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint"
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
@@ -656,7 +656,7 @@ fi
 #     explicitly asserting no PENDING marker appears anywhere. ---
 CLEAN_SWEEP2_FX="$(mktemp -d)"
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
-write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)"
+write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint"
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
@@ -675,11 +675,15 @@ assert_zero_mutations "$LOG" "G1c: clean full sweep --check makes zero mutating 
 rm -rf "$CLEAN_SWEEP2_FX"
 
 # --- G1d: drift (extras) AND missing together on the SAME repo -> exit 1,
-#     BOTH markers appear. Scratch fixture based on registry-rs-insync:
-#     live swaps "conformance (spec fixtures)" for an undeclared "nightly
-#     fuzz (spec fixtures)" -- so live has one check checks_for() doesn't
-#     declare (extras) AND is missing one checks_for() does declare
-#     (missing), in the same repo, same run. ---
+#     BOTH markers appear. This fixture hardcodes its own 4-item contexts/checks
+#     arrays below (does not derive from registry-rs-insync's base count) --
+#     live is {rustfmt, clippy, tests, "nightly fuzz (spec fixtures)"}, so live
+#     has one check checks_for()'s now-6-item declared set doesn't declare
+#     (extras: nightly fuzz) AND is missing several checks_for() does declare
+#     (missing: conformance (spec fixtures), cargo-deny, lint), in the same
+#     repo, same run -- the assertion below only greps for BOTH marker types
+#     appearing and for "conformance (spec fixtures)" surviving in the missing
+#     list, so it holds regardless of the exact missing-set size. ---
 SCRATCH_BOTH="$(mktemp -d)"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" "$SCRATCH_BOTH/"
 jq '.protection.required_status_checks.contexts = ["rustfmt","clippy","tests","nightly fuzz (spec fixtures)"]

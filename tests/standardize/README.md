@@ -107,7 +107,7 @@ credential, token, or private-repo payload.
 | Case | Purpose |
 |---|---|
 | `registry-rs-drift` | `acdp-registry-rs` live has 4 contexts (`rustfmt`, `clippy`, `tests`, `conformance (spec fixtures)`); `checks_for()` only declares the first 3 — the real drift this whole wave exists to fix. |
-| `registry-rs-insync` | Same live fixture, reused once Phase 2 adds the 4th check to `checks_for()` — becomes the "no drift" case. |
+| `registry-rs-insync` | Same live fixture, reused once `checks_for()` matches live — the "no drift" case. |
 | `control-plane-reorder` | `acdp-control-plane`'s same 3 declared checks, in a shuffled live order — the false-positive trap; order must never read as drift. |
 | `playground-exact` | `acdp-playground`'s live branch has 2 contexts; `checks_for()` now declares 3 (`docker image builds` was added in Phase 2) — a missing-declared-check-never-blocks case, not an exact match. |
 | `unprotected` | `acdp-ci`, currently unprotected (`protected:false`) — the normal first-apply case. |
@@ -134,8 +134,8 @@ is the captured evidence of it.
 
 **`baseline-drift-demo.txt` is FROZEN pre-fix evidence — `run.sh` no longer
 regenerates it.** It was captured once, against the script as it stood
-before Phase 2's `checks_for()` fix. Now that `checks_for()` declares all 4
-of `acdp-registry-rs`'s live checks, re-running that same demonstration
+before Phase 2's `checks_for()` fix. Now that `checks_for()` no longer drops
+any of `acdp-registry-rs`'s live checks, re-running that same demonstration
 against the fixed script would no longer show a drop — it would just
 overwrite the proof the bug ever existed with a post-fix negative result.
 So `run.sh` only *asserts* the frozen file is still present and still shows

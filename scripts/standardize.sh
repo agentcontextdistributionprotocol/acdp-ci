@@ -132,7 +132,8 @@
 # allow_deletions (the last two now asserted explicitly as of wave 5, rather
 # than relying on undocumented PUT defaults): strict (only set on the
 # has-checks branch), required_status_checks.checks (the per-check app_id
-# pinning — verified live 2026-09-05: acdp-registry-rs has all four checks
+# pinning — verified live 2026-09-24: acdp-registry-rs has all six checks
+# (rustfmt, clippy, tests, conformance (spec fixtures), cargo-deny, lint)
 # pinned to app_id:15368, while acdp-control-plane is MIXED, one check
 # pinned and two app_id:null — direct evidence that a prior contexts-only
 # PUT already widened two of its checks to "any app"),
@@ -201,7 +202,7 @@ checks_for() {
     acdp-control-plane)
       printf '%s\n' "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)" ;;
     acdp-registry-rs)
-      printf '%s\n' "rustfmt" "clippy" "tests" "conformance (spec fixtures)" ;;
+      printf '%s\n' "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" ;;
     acdp-playground)
       printf '%s\n' "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds" ;;
     acdp-verifier-py)
