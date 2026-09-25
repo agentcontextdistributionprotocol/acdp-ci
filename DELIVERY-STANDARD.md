@@ -96,8 +96,33 @@ acdp-rs publishes ───┼─ npm   (bindings)     ─▶ dispatch ▶ acdp-
 
 Each publish job fires `repository_dispatch: acdp-released` (payload
 `{version, ecosystem}`) at its consumer(s) using an `acdp-deps-bot` App token.
-The consumer's `bump-acdp.yml` calls `bump-consume.yml`. Dependabot's weekly
-`acdp` group is the safety net if a dispatch is ever missed.
+The consumer's `bump-acdp.yml` calls `bump-consume.yml`. Dependabot's monthly
+`acdp` group is the safety net if a dispatch is ever missed — **for the two
+consumers that actually have one.** `acdp-control-plane`'s `acdp-sdk` group and
+`acdp-registry-rs`'s cargo update-type catch-all groups (no `ignore` blocks `acdp`
+in either) both cover it. `acdp-playground` does not: `.github/dependabot.yml`
+explicitly `ignore`s the `acdp` dependency by name, a deliberate choice (bumping it
+is a semantic surface change, not a mechanical one) — but it means `acdp-playground`
+has no fallback at all if its dispatch is ever missed.
+
+**Known gap, already tracked in `acdp-rs`, not fixed here:** `acdp-rs`'s standard release
+path, `.github/workflows/release-plz.yml:129-138`, fires `bindings-release.yml` and
+`acdp-py-release.yml` via `workflow_dispatch` (`-f dry_run=false`) for **every** real
+release — not as an edge case, that's how releases normally happen. Both workflows gate
+their `repository_dispatch: acdp-released` step on `if: ${{ github.event_name ==
+'push' }}` alone (`acdp-py-release.yml`: token-mint `:209`, dispatch `:217`;
+`bindings-release.yml`: token-mint `:238-239`, dispatch `:246-254`), so the notification
+is skipped by construction on every release-plz-driven release. Combined with
+`acdp-playground`'s missing Dependabot fallback above, this is what let its `acdp` pin
+fall six minor versions behind (0.8.3 → 0.14.1, all eight releases since 0.10.0 missed)
+before anyone noticed by hand; `acdp-control-plane` sat pinned at `^0.8.5` against npm's `0.14.1` for
+the identical reason. Both halves are open, independently filed issues —
+[acdp-rs#302](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/302)
+(npm/`bindings-release.yml`, with a full fix plan already linked from it) and
+[acdp-rs#304](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/304)
+(PyPI/`acdp-py-release.yml`) — see
+`plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how they relate and one gap in
+`#304`'s own suggested fix that this repo found while cross-checking it.
 
 Leaves — standardized (CI + auto-merge + Dependabot) but no SDK dependency, so
 no `bump-acdp`:
@@ -136,7 +161,8 @@ Dependabot safety net.
    version in place preserving `features`, virtual-workspace-safe, then
    `cargo update --precise`; `uv` runs `uv lock --upgrade-package`), opens a PR,
    and arms auto-merge **unless the bump is breaking** (major, or a `0.x` minor).
-3. Missed dispatch → Dependabot's weekly `acdp` group opens the same PR later.
+3. Missed dispatch → Dependabot's monthly `acdp` group opens the same PR later
+   (`acdp-playground` excepted — see the propagation-graph section above).
 
 ### npm aliases are forbidden for family packages
 
@@ -149,7 +175,7 @@ own npm rewrite loop already handles an aliased entry correctly — its `else if
 branch (`bump-consume.yml:157`) matches `d[k].startsWith("npm:"+pkg+"@")`
 against **every** key in the dependency section, not just `k===pkg`, so the fast
 dispatch path rewrites an alias's value regardless of what its own key is named.
-The actual risk is the *safety net*: Dependabot's weekly sweep — which exists
+The actual risk is the *safety net*: Dependabot's monthly sweep — which exists
 specifically to catch a missed `bump-consume` dispatch — does not reliably
 follow `npm:` alias specifiers, so an aliased family dependency can silently
 desync whenever the fast path is missed and only the safety net fires. This is
