@@ -132,10 +132,20 @@
 # allow_deletions (the last two now asserted explicitly as of wave 5, rather
 # than relying on undocumented PUT defaults): strict (only set on the
 # has-checks branch), required_status_checks.checks (the per-check app_id
-# pinning — verified live 2026-09-05: acdp-registry-rs has all four checks
+# pinning — verified live 2026-09-24: acdp-registry-rs has all six checks
+# (rustfmt, clippy, tests, conformance (spec fixtures), cargo-deny, lint)
 # pinned to app_id:15368, while acdp-control-plane is MIXED, one check
 # pinned and two app_id:null — direct evidence that a prior contexts-only
-# PUT already widened two of its checks to "any app"),
+# PUT already widened two of its checks to "any app". Before this checks_for()
+# entry named all six, the drift guard itself refused an apply against
+# acdp-registry-rs outright (live 6 ⊋ declared 4, without --allow-check-removal)
+# — an incidental protection from exactly this reset. That guard no longer
+# blocks it: a live apply now succeeds, and per the gap above would silently
+# widen all six of its checks to app_id:null, the same way two of
+# acdp-control-plane's already got widened. No apply is required or
+# recommended by this change alone — every declared check is already live —
+# but whoever next runs an apply against acdp-registry-rs (named explicitly or
+# via a full sweep) should know it unpins these six the same way.),
 # required_linear_history, required_conversation_resolution, lock_branch,
 # block_creations, allow_fork_syncing. And, as noted above, the drift guard
 # cannot see a real PR gate that was never added to checks_for() in the
@@ -201,7 +211,7 @@ checks_for() {
     acdp-control-plane)
       printf '%s\n' "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)" ;;
     acdp-registry-rs)
-      printf '%s\n' "rustfmt" "clippy" "tests" "conformance (spec fixtures)" ;;
+      printf '%s\n' "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" ;;
     acdp-playground)
       printf '%s\n' "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds" ;;
     acdp-verifier-py)
