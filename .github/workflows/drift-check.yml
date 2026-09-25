@@ -163,7 +163,12 @@ jobs:
             echo "**Remedy:** run \`./scripts/standardize.sh <repo>\` (no \`--check\`) locally with \`gh auth\` admin:org for the affected repo (or with no repo argument to apply to every managed repo), after reconciling \`checks_for()\` with what should be live -- see the script's header comment for the drift guard and \`--allow-check-removal\`. For a pending-apply-only issue (no drift), the apply is expected to complete without needing \`--allow-check-removal\`."
           } > drift-check-body.md
 
-          existing=$(gh issue list --state open --label "$LABEL" --json number,title \
+          # --limit: gh's own default is 30 -- fine today (this label has a
+          # handful of issues at most) but silent if it's ever not: a match
+          # past the 30th would simply never be found, and a second tracking
+          # issue would get created instead of updating the first. 200 is
+          # generous headroom, not a real expected count.
+          existing=$(gh issue list --state open --label "$LABEL" --limit 200 --json number,title \
             | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)][0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body-file drift-check-body.md
