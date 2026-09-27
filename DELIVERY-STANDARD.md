@@ -91,10 +91,15 @@ anchored by the release-plz tag alone, not by an attestation.
 ```
                      ┌─ crate (release-plz) ─▶ dispatch  ▶ acdp-registry-rs   → cargo add acdp@X
 acdp-rs publishes ───┼─ npm   (bindings)     ─▶ dispatch* ▶ acdp-control-plane → npm re-lock
-                     └─ py    (py-release)   ─▶ dispatch* ▶ acdp-playground    → uv lock --upgrade
+                     ├─ py    (py-release)   ─▶ dispatch* ▶ acdp-playground    → uv lock --upgrade
+                     └─ wasm  (wasm-release) ─▶ dispatch† ▶ acdp-ui-console    → (no consumer wired up yet)
 
 * skipped on every real release today, not just an edge case — see the known-gap
   paragraph below.
+† fires correctly on every real release (fixed 2026-09-27, acdp-rs#307/#308) but has
+  nowhere to land — acdp-ui-console has no bump-acdp.yml and no workflow listening for
+  repository_dispatch: acdp-released, so the event is delivered and silently dropped;
+  see the acdp-ui-console paragraph below.
 ```
 
 Each publish job fires `repository_dispatch: acdp-released` (payload
@@ -138,6 +143,24 @@ repo just fixed in its own `.gitignore` — so the link 404s; see
 `plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how they relate and one gap in
 `#304`'s own suggested fix that this repo found while cross-checking it.
 
+**A fourth, differently-shaped gap, partially closed:**
+`acdp-wasm-release.yml` (npm, `acdp-ui-console`) never had a `#302`/`#304`-style gating
+bug — until [acdp-rs#307](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/307)
+it had no `repository_dispatch: acdp-released` step at all. `acdp-rs#308` (merged
+2026-09-27) added one, correctly: it gates on `if: ${{ always() && steps.publish.outcome
+== 'success' && (github.event_name == 'push' || !inputs.dry_run) }}` — so, unlike the two
+gaps above, it fires on both a tag push *and* a non-dry-run `workflow_dispatch`, and it
+derives `VER` from `inputs.version` with a semver guard exactly the way
+`plans/cross-repo/acdp-rs-release-dispatch-gap.md` describes `#302`'s linked plan doing
+for `bindings-release.yml`. What's still missing is entirely receiver-side:
+`acdp-ui-console` has no `bump-acdp.yml` and no workflow declares `on:
+repository_dispatch` for this event type at all (confirmed live — none of its five
+workflow files mention `repository_dispatch`), so every dispatch this step sends today is
+delivered and dropped with no error and no PR. Adding the consumer automation was decided
+**yes** in [acdp-ui-console#70](https://github.com/agentcontextdistributionprotocol/acdp-ui-console/issues/70#issuecomment-5835639012)
+(2026-09-25); tracking the doc update once it lands is
+[acdp-ci#26](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/26).
+
 Leaves — standardized (CI + auto-merge + Dependabot) but no SDK dependency, so
 no `bump-acdp`:
 
@@ -148,12 +171,16 @@ no `bump-acdp`:
 `acdp-ui-console` is *not* in this list: `package.json:22` depends on
 `@agentcontextdistributionprotocol/acdp-wasm` (`^0.8.5` on `main` as of 2026-09-24, npm
 `latest` is `0.14.1` — six minors behind, the same shape as the `acdp-playground`/
-`acdp-control-plane` staleness above). `acdp-wasm-release.yml` has no dispatch step at
-all, so Dependabot's `npm` group is this pin's *only* update path, not a fallback for a
-missed dispatch — and that sole path evidently hasn't caught it either. It has no
-`bump-acdp.yml` and does not currently receive `acdp-released` dispatches. Whether it
-should get the same dispatch-driven `bump-acdp` automation as the other consumers is
-tracked in `acdp-ui-console#70`, not decided here.
+`acdp-control-plane` staleness above). As of 2026-09-27 (`acdp-rs#307`/`#308`),
+`acdp-wasm-release.yml` *does* now fire `repository_dispatch: acdp-released` correctly on
+every real release (see the known-gap section above for detail) — but `acdp-ui-console`
+still has no `bump-acdp.yml` and no workflow listens for that event, so the dispatch is
+delivered and silently dropped. Dependabot's `npm` group remains this pin's only *actual*
+update path today, same as before the fix, and that sole path evidently hasn't caught it
+either. Adding the same dispatch-driven `bump-acdp` automation the other three consumers
+have was decided **yes** in `acdp-ui-console#70` (2026-09-25) — not yet implemented; this
+paragraph and the propagation-graph diagram above are tracked for a follow-up update once
+it lands, in `acdp-ci#26`.
 
 ## Propagation mechanics
 
@@ -164,13 +191,17 @@ not repeated here.
 ### SDK propagation (a new `acdp` package → its consumers)
 
 1. `acdp-rs` publishes (`release-plz` crate / `bindings-release` npm tag /
-   `acdp-py-release` PyPI tag). Each publish job, on a real publish, mints an
-   App token scoped to the consumer and POSTs `repository_dispatch: acdp-released`
-   with `client_payload {version, ecosystem}`.
+   `acdp-py-release` PyPI tag / `acdp-wasm-release` npm tag). Each publish job, on a
+   real publish, mints an App token scoped to the consumer and POSTs
+   `repository_dispatch: acdp-released` with `client_payload {version, ecosystem}`.
    - crate → `acdp-registry-rs` (detected from release-plz's `releases` output;
      other workspace crates are ignored)
    - npm → `acdp-control-plane` (version from the `acdp-node-v*` tag)
    - PyPI → `acdp-playground` (version from the `acdp-py-v*` tag)
+   - npm (wasm) → `acdp-ui-console` (version from the `acdp-wasm-v*` tag) — dispatch
+     fires correctly as of `acdp-rs#307`/`#308`, but this consumer has no
+     `bump-acdp.yml` yet, so step 2 below doesn't apply to it today; see the
+     propagation-graph section above.
 2. The consumer's thin `bump-acdp.yml` calls `bump-consume.yml@v1`, which:
    resolves the target, **waits for the registry to actually serve it** (npm CDN
    / crates.io index / PyPI can lag a publish), bumps the manifest + lockfile for
@@ -627,12 +658,12 @@ automatic, audit-logged bypass; rollback is one DELETE.
 
 | Repo | Lang | CI caller | auto-merge | Dependabot | bump-acdp | Publish | Graph role |
 |---|---|---|---|---|---|---|---|
-| acdp-rs | Rust | own ci | ✅ | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / 1 of 3 dispatches fires reliably — see propagation graph** |
+| acdp-rs | Rust | own ci | ✅ | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / crate+wasm dispatch correctly, npm+py don't (push-only gate); wasm has no consumer yet — see propagation graph** |
 | acdp-registry-rs | Rust | own ci | ✅ | cargo+ga | cargo | Docker + crate | consumes crate |
 | acdp-control-plane | npm | own ci | ✅ | npm+docker+ga | npm | Docker | consumes npm |
 | acdp-playground | Python/uv | own ci | ✅ | uv+ga | uv | Docker | consumes py |
 | acdp-verifier-py | Python | own ci | ✅ | pip+ga | — | — | independent |
-| acdp-ui-console | TS | own ci | ✅ | npm+ga | — | Vercel | consumes wasm (Dependabot only, no dispatch — acdp-ui-console#70) |
+| acdp-ui-console | TS | own ci | ✅ | npm+ga | — | Vercel | consumes wasm (dispatch now fires correctly, no consumer wired up yet — acdp-ui-console#70 / acdp-ci#26) |
 | acdp-website | MDX | own ci | add | npm+ga | — | Vercel | leaf |
 | acdp-ci | YAML/bash | n/a — also has `drift-check.yml` (`schedule`/`workflow_dispatch`) as of CI-8, but zero check-runs on its own PRs still holds | ❌ (protection-only, see `standardize.sh`) | ga (2 dirs: root + `actions/checkout-spec`) | — | — | **infra — this is the hub; every repo above consumes it at `@v1`** |
 | `.github` | — | n/a — no `.github/workflows/` at all | ❌ (protection-only, see `standardize.sh`) | — | — | — | org profile + community health files |
