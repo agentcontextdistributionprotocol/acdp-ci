@@ -131,3 +131,11 @@
 - **Alternatives:** a `gate-script` input loaded from the base SHA (deferred until a repo needs acdp-rs-style lockfile gating); `!cancelled()` disarm.
 - **Blast radius if wrong:** an unevaluable group list arms (documented asymmetry); a stale arm can survive a gate-step failure.
 - **Status:** UNCONFIRMED
+
+## standardize.sh: mutants, UNREGISTERED and the registry baseline
+- **Plan:** plans/open-issues-sweep.md (Phases 2-4)
+- **Assumed:** (a) `app_id: null` in the registry baseline is rejected, never defaulted (pinning is the point of the file); (b) #22 can close once all five guards it listed are mutation-covered (77 of 143 assertions measured; the rest are unmeasured, not known-good); (c) forks are not auto-ignored by the UNREGISTERED check (an org fork must be listed in EXCLUDED_REPOS); (d) org-listing pagination is exercised by `gh api --paginate`, not offline; (e) trust direction flips for the registry: its own repo file now decides the declared checks, so a PR there that weakens `.github/required-checks.json` weakens protection at the next apply (it is reviewed there, and `--check` still reports drift).
+- **Chose:** fail-closed validation of the baseline; UNREGISTERED reported as a finding (exit 1), not fatal.
+- **Alternatives:** keep hand-copied lists (the #33 drift problem); defaulting a null app_id to any-app.
+- **Blast radius if wrong:** a rejected baseline stops registry protection from applying (drift-check reports UNREADABLE); a mis-listed exclusion hides one repo from the UNREGISTERED report.
+- **Status:** UNCONFIRMED

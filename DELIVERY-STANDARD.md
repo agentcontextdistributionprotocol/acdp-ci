@@ -93,7 +93,6 @@ anchored by the release-plz tag alone, not by an attestation.
 acdp-rs publishes ───┼─ npm   (bindings)     ─▶ dispatch  ▶ acdp-control-plane → npm re-lock
                      ├─ py    (py-release)   ─▶ dispatch  ▶ acdp-playground    → uv lock --upgrade
                      └─ wasm  (wasm-release) ─▶ dispatch  ▶ acdp-ui-console    → npm re-lock (acdp-wasm)
-
 ```
 
 The wasm lane is the fourth consumer lane: it publishes the *distinct* package
@@ -125,8 +124,8 @@ path, `.github/workflows/release-plz.yml:129-138`, fires `bindings-release.yml` 
 `acdp-py-release.yml` via `workflow_dispatch` (`-f dry_run=false`) for **every** real
 release — not as an edge case, that's how releases normally happen. Both workflows used to gate
 their `repository_dispatch: acdp-released` step on `if: ${{ github.event_name ==
-'push' }}` alone (`acdp-py-release.yml`: token-mint `:209`, dispatch `:217`;
-`bindings-release.yml`: token-mint `:238-239`, dispatch `:246-254`), so the notification
+'push' }}` alone (the token-mint and dispatch steps in `acdp-py-release.yml` and
+`bindings-release.yml`; line numbers omitted — they drifted once the fix landed), so the notification
 was skipped by construction on every release-plz-driven release. Combined with
 `acdp-playground`'s missing Dependabot fallback above, this is what let its `acdp` pin
 fall six minor versions behind (0.8.3 → 0.14.1, all eight releases since 0.10.0 missed)
@@ -525,7 +524,10 @@ merge past protection, and cannot touch the `v1` tag at all.
 ## Releasing `acdp-ci` (the `v1` tag)
 
 Every consumer resolves `acdp-ci/.github/workflows/*@v1` at that one
-**mutable** tag on every run. `acdp-ci/actions/checkout-spec` is the
+**mutable** tag on every run. The composite actions `actions/npm-relock` and `actions/auto-merge-gate` are
+referenced at `@v1` too (by `bump-consume.yml` / `auto-merge.yml`), so they float with
+the workflows and roll back with them — a workflow run from a branch or pinned by SHA
+before the move cannot resolve them. `acdp-ci/actions/checkout-spec` is the
 exception, by ruling (above): callers pin it by full commit SHA, so a
 `checkout-spec` caller does not re-resolve `v1` on every run — it stays on
 whatever SHA it last bumped to, until it deliberately bumps again. Moving
