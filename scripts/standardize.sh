@@ -156,7 +156,8 @@
 # contents API (checks_for() status 3 -> registry_baseline()). One source of
 # truth: contexts, per-check app_id, strict and enforce_admins all come from
 # that file, and a baseline that is unreadable, malformed, has an empty
-# `required` list or a null/non-integer app_id is refused, never defaulted.
+# `required` list, a blank/control-character context, a non-positive or
+# non-integer app_id, or a non-array advisory_pending is refused, never defaulted.
 # Trust note: a merge to that repo's main now decides what an admin-token apply
 # PUTs there; weakening the list shows up as DRIFT, an empty one is rejected.
 #
@@ -305,7 +306,7 @@ registry_baseline() {
        | if ([.required[].context] - ([.required[].context] - $adv) | length) > 0 then bad("a context is both required and advisory_pending") else . end)
     | {strict, enforce_admins, pending_settings, required: (.required | map({context, app_id}))}
   ' 2>/dev/null); then
-    echo "!! $repo: .github/required-checks.json is not a valid baseline (unparseable, wrong shape, empty required, or null/non-integer app_id) — refusing to derive protection from it" >&2
+    echo "!! $repo: .github/required-checks.json is not a valid baseline (unparseable, wrong shape, empty required, blank/control-character context, bad app_id, or bad advisory_pending) — refusing to derive protection from it" >&2
     return 1
   fi
   BASE_CONTEXTS=$(printf '%s' "$BASE_BODY" | jq -r '.required[].context')
@@ -610,7 +611,7 @@ for repo in $repos; do
   if [ "$extras_len" -gt 0 ]; then
     extras_list=$(printf '%s' "$extras" | jq -r 'join(", ")')
     if [ "$ALLOW_CHECK_REMOVAL" -eq 1 ]; then
-      echo "!! $repo: --allow-check-removal set — proceeding despite live required check(s) not in checks_for(): $extras_list"
+      echo "!! $repo: --allow-check-removal set — proceeding despite live required check(s) not in $declared_src: $extras_list"
     elif [ "$CHECK_MODE" -eq 1 ]; then
       echo "!! DRIFT: $repo: live required check(s) not declared in $declared_src — would be DROPPED by the next PUT: $extras_list"
       DRIFT=1

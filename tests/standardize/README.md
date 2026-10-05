@@ -162,7 +162,7 @@ assertions would *notice* if `standardize.sh` stopped behaving correctly. A
 test that passes with the bug injected is worth nothing, and from the outside
 it is indistinguishable from one that works — green either way.
 
-`./tests/standardize/mutants.sh` injects twenty-seven known bugs and requires the
+`./tests/standardize/mutants.sh` injects twenty-nine known bugs and requires the
 suite to fail on each (killer sets for all but the original four were *measured*, not guessed):
 
 | mutant | assertions that catch it |
