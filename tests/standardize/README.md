@@ -162,8 +162,8 @@ assertions would *notice* if `standardize.sh` stopped behaving correctly. A
 test that passes with the bug injected is worth nothing, and from the outside
 it is indistinguishable from one that works — green either way.
 
-`./tests/standardize/mutants.sh` injects fourteen known bugs and requires the
-suite to fail on each (killer sets for the last ten were *measured*, not guessed):
+`./tests/standardize/mutants.sh` injects twenty known bugs and requires the
+suite to fail on each (killer sets for the last sixteen were *measured*, not guessed):
 
 | mutant | assertions that catch it |
 |---|---|
@@ -181,8 +181,14 @@ suite to fail on each (killer sets for the last ten were *measured*, not guessed
 | registry `enforce_admins` true → false | 1 |
 | protection PUT attempted before the settings PATCH | 3 |
 | registry checks no longer pinned to an `app_id` | 3 |
+| UNREGISTERED: flag never accumulated | 2 |
+| UNREGISTERED: exclusion subtraction removed | 4 |
+| UNREGISTERED: unreadable listing no longer an error (fail-open) | 2 |
+| UNREGISTERED: escalated to fatal exit 2 | 2 |
+| UNREGISTERED: org enumerated even when repos are named | 6 |
+| UNREGISTERED: accounted-for-repo sanity check removed | 2 |
 
-**Honest coverage:** 28 distinct assertions of 94 are mutation-measured
+**Honest coverage:** 43 distinct assertions of 108 are mutation-measured
 (acdp-ci#22 asked for the guards with zero coverage, not one mutant per
 assertion — all five it listed are now covered; one mutant per guard variant,
 not the plan's two for `enforce_admins`-registry and `app_id`). The rest are unmeasured, not
@@ -245,3 +251,8 @@ the costume of a subtle one.
 Not wired into CI: this repo produces no check-runs on its own PRs, and the
 harness rewrites `scripts/standardize.sh` in place (restored via `trap`, and
 on abort). Run it by hand when changing a guard or an assertion around one.
+
+**Known limit (UNREGISTERED, acdp-ci#19):** the stub ignores `--paginate`, so
+"more than one page of org repos" is not exercised offline. It relies on real
+`gh --paginate --jq` applying the filter per page (checked live with
+`?per_page=2`: all repos still returned).

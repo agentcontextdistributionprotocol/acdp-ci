@@ -108,13 +108,13 @@ jobs:
           set -e
           echo "status=$status" >> "$GITHUB_OUTPUT"
           case "$status" in
-            0|1) ;; # 0 = clean, 1 = drift and/or an unreadable repo and/or a declared-but-not-yet-live check -- all three are expected outcomes
+            0|1) ;; # 0 = clean, 1 = drift, an unreadable repo, a declared-but-not-yet-live check, and/or an UNREGISTERED org repo -- all expected outcomes
             *)
               # Anything else (script missing/not executable, bad flags,
               # internal jq/gh error) is NOT a drift signal -- it means the
               # check never actually ran to completion. Fail the job loudly
               # instead of silently treating this as "no drift found."
-              echo "::error::scripts/standardize.sh --check exited $status (expected 0=clean or 1=drift/errors/pending-apply) -- the check did not complete; treating this as a hard job failure, not a drift result."
+              echo "::error::scripts/standardize.sh --check exited $status (expected 0=clean or 1=drift/errors/pending-apply/unregistered) -- the check did not complete; treating this as a hard job failure, not a drift result."
               exit "$status"
               ;;
           esac
@@ -146,9 +146,9 @@ jobs:
             --force >/dev/null
 
           {
-            echo "\`scripts/standardize.sh --check\` found required-status-check drift, an unreadable repo, **or** a declared check not yet applied, on this run."
+            echo "\`scripts/standardize.sh --check\` found required-status-check drift, an unreadable repo, **or** a declared check not yet applied, on this run (or an org repo that is neither managed nor deliberately excluded)."
             echo
-            echo "\`--check\` is fail-closed: it exits non-zero when any of three independent conditions occur -- a live required check would be dropped by the next apply (drift), a repo/branch simply couldn't be read (e.g. a degraded token), or \`checks_for()\` declares a check that isn't live yet (pending an apply). This issue does not distinguish which -- read the output below (drift lines start \`!! DRIFT:\`, pending-apply lines start \`!! PENDING:\`, unreadable-repo lines are the remaining \`!!\` lines)."
+            echo "\`--check\` is fail-closed: it exits non-zero when any of four independent conditions occur -- a live required check would be dropped by the next apply (drift), a repo/branch simply couldn't be read (e.g. a degraded token), \`checks_for()\` declares a check that isn't live yet (pending an apply), or an org repo is in neither \`ALL_REPOS\` nor \`EXCLUDED_REPOS\` (UNREGISTERED -- fix by adding it to one of them, with a reason if excluded). This issue does not distinguish which -- read the output below (drift lines start \`!! DRIFT:\`, pending-apply lines start \`!! PENDING:\`, unregistered lines start \`!! UNREGISTERED:\`, unreadable-repo lines are the remaining \`!!\` lines)."
             echo
             echo "Run: $RUN_URL"
             echo
