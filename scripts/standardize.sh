@@ -132,8 +132,8 @@
 # allow_deletions (the last two now asserted explicitly as of wave 5, rather
 # than relying on undocumented PUT defaults): strict (only set on the
 # has-checks branch), required_status_checks.checks (the per-check app_id
-# pinning: acdp-registry-rs is now PUT with `checks` pinned to app_id:15368
-# (see app_id_for()), matching its baseline; acdp-control-plane is MIXED live,
+# pinning: acdp-registry-rs is PUT with `checks`, each pinned to the app_id
+# in its own committed baseline (see registry_baseline()); acdp-control-plane is MIXED live,
 # one check pinned and two app_id:null — a prior contexts-only PUT already
 # widened two of its checks to "any app", and every other repo still gets a
 # contexts-only PUT that does the same),
@@ -297,10 +297,10 @@ registry_baseline() {
     | if (.enforce_admins | type) != "boolean" then bad("enforce_admins must be a boolean") else . end
     | if (.pending_settings | type) != "boolean" then bad("pending_settings must be a boolean") else . end
     | if (.required | type) != "array" or (.required | length) == 0 then bad("required must be a non-empty array") else . end
-    | if (.required | map(.context | type == "string" and length > 0) | all | not) then bad("every required context must be a non-empty string") else . end
-    | if (.required | map(.app_id | type == "number" and . == floor) | all | not) then bad("every required app_id must be an integer (null is rejected)") else . end
+    | if (.required | map(.context | type == "string" and length > 0 and (test("^\\s*$") | not) and (explode | map(. < 32 or . == 127) | any | not)) | all | not) then bad("every required context must be a non-empty string with no control characters (a newline would split into several names in the drift guard)") else . end
+    | if (.required | map(.app_id | type == "number" and . == floor and . > 0 and . < 4503599627370496) | all | not) then bad("every required app_id must be a positive integer (null, 0, -1 = any app, and non-integers are rejected)") else . end
     | if ((.required | map(.context) | unique | length) != (.required | length)) then bad("duplicate required contexts") else . end
-    | ((.advisory_pending // []) as $adv
+    | ((if has("advisory_pending") then .advisory_pending else [] end) as $adv
        | if ($adv | type) != "array" or ($adv | map(type == "string") | all | not) then bad("advisory_pending must be an array of strings") else . end
        | if ([.required[].context] - ([.required[].context] - $adv) | length) > 0 then bad("a context is both required and advisory_pending") else . end)
     | {strict, enforce_admins, pending_settings, required: (.required | map({context, app_id}))}
@@ -501,7 +501,9 @@ for repo in $repos; do
   # unreadable or invalid baseline is an unreadable repo (a single-repo run
   # exits 2, a sweep exits 1 naming it); in apply it aborts with zero mutations.
   baseline=0
+  declared_src="checks_for()"
   if [ "$cf_rc" -eq 3 ]; then
+    declared_src=".github/required-checks.json"
     baseline=1
     if ! registry_baseline "$repo"; then
       if [ "$CHECK_MODE" -eq 1 ]; then
@@ -514,6 +516,18 @@ for repo in $repos; do
       fi
     fi
     lines="$BASE_CONTEXTS"
+    # Defense in depth: validation rejects an empty/whitespace-only list, but if
+    # the derived list were ever empty the protection-only branch below would
+    # PUT required_status_checks:null onto a repo that has real checks.
+    if [ -z "$lines" ]; then
+      echo "!! $repo: baseline produced no required contexts — refusing the protection-only path" >&2
+      if [ "$CHECK_MODE" -eq 1 ]; then
+        ERRORS=1
+        UNREADABLE=$((UNREADABLE + 1))
+        continue
+      fi
+      exit 1
+    fi
   fi
 
   if ! branch=$(default_branch "$repo"); then
@@ -598,7 +612,7 @@ for repo in $repos; do
     if [ "$ALLOW_CHECK_REMOVAL" -eq 1 ]; then
       echo "!! $repo: --allow-check-removal set — proceeding despite live required check(s) not in checks_for(): $extras_list"
     elif [ "$CHECK_MODE" -eq 1 ]; then
-      echo "!! DRIFT: $repo: live required check(s) not declared in checks_for() — would be DROPPED by the next PUT: $extras_list"
+      echo "!! DRIFT: $repo: live required check(s) not declared in $declared_src — would be DROPPED by the next PUT: $extras_list"
       DRIFT=1
       # Deliberately NOT `continue` here: --check must still compute and
       # report `missing` (below) for this same repo before moving on, so a
@@ -606,7 +620,7 @@ for repo in $repos; do
       # Apply mode never reaches this branch without exiting above (drift
       # blocks apply unconditionally, same as before this change).
     else
-      echo "!! DRIFT: $repo: live required check(s) not declared in checks_for() — would be DROPPED by the next PUT: $extras_list (use --allow-check-removal to override)" >&2
+      echo "!! DRIFT: $repo: live required check(s) not declared in $declared_src — would be DROPPED by the next PUT: $extras_list (use --allow-check-removal to override)" >&2
       exit 1
     fi
     # extras_len > 0: something live either isn't declared (DRIFT, reported

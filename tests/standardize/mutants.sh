@@ -323,12 +323,22 @@ check: prints the live contexts it read, per repo, even when in sync
 G1c: clean full sweep still exits 0, no PENDING marker
 G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear
 G4 regression guard: default no-arg full sweep --check still exits 0
-override: PUT body reaches the mutation path with the reduced (declared-only) contexts"
-apply_mutant "baseline: app_id null accepted" \
-  'if (.required | map(.app_id | type == "number" and . == floor) | all | not) then bad("every required app_id must be an integer (null is rejected)") else . end' '.' \
+override: PUT body reaches the mutation path with the reduced (declared-only) contexts
+A3: advisory_pending present but not an array -> refused, exit 1, zero mutations
+A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations
+A3: context that is only a newline (would empty the list -> protection-only PUT) -> refused, exit 1, zero mutations
+A3: context with an embedded newline (would split into two names in the drift guard) -> refused, exit 1, zero mutations
+A3: whitespace-only context -> refused, exit 1, zero mutations"
+apply_mutant "baseline: app_id validation removed (any value accepted)" \
+  'type == "number" and . == floor and . > 0 and . < 4503599627370496)' 'true)' \
   "A3: fractional app_id -> refused, exit 1, zero mutations
 A3: null app_id -> refused, exit 1, zero mutations
-A3: string app_id -> refused, exit 1, zero mutations"
+A3: string app_id -> refused, exit 1, zero mutations
+A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations"
 apply_mutant "baseline: unreadable baseline not an error in --check" \
   '      if [ "$CHECK_MODE" -eq 1 ]; then
         ERRORS=1
@@ -361,7 +371,14 @@ A3: non-boolean pending_settings -> refused, exit 1, zero mutations
 A3: non-string context -> refused, exit 1, zero mutations
 A3: null app_id -> refused, exit 1, zero mutations
 A3: required missing -> refused, exit 1, zero mutations
-A3: string app_id -> refused, exit 1, zero mutations"
+A3: string app_id -> refused, exit 1, zero mutations
+A3: advisory_pending present but not an array -> refused, exit 1, zero mutations
+A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations
+A3: context that is only a newline (would empty the list -> protection-only PUT) -> refused, exit 1, zero mutations
+A3: context with an embedded newline (would split into two names in the drift guard) -> refused, exit 1, zero mutations
+A3: whitespace-only context -> refused, exit 1, zero mutations"
 apply_mutant "baseline: strict hardcoded true" \
   'required_status_checks: { strict: .strict, checks: .required },' 'required_status_checks: { strict: true, checks: .required },' \
   "A5: PUT takes enforce_admins, strict and app_id from the baseline file"
@@ -387,6 +404,15 @@ G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear
 G4 regression guard: default no-arg full sweep --check still exits 0
 override: --allow-check-removal lets a drifted apply complete
 override: PUT body reaches the mutation path with the reduced (declared-only) contexts"
+
+apply_mutant "baseline: control characters in a context accepted" \
+  ' and (explode | map(. < 32 or . == 127) | any | not)' '' \
+  'A3: context with an embedded newline (would split into two names in the drift guard) -> refused, exit 1, zero mutations'
+apply_mutant "baseline: app_id -1 / 0 accepted (positive check removed)" \
+  ' and . > 0 and . < 4503599627370496' '' \
+  'A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations'
 
 echo
 echo "===================="

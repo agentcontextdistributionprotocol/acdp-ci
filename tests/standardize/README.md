@@ -167,20 +167,20 @@ suite to fail on each (killer sets for all but the original four were *measured*
 
 | mutant | assertions that catch it |
 |---|---|
-| drift detection disabled (`extras` always empty) | 4 |
+| drift detection disabled (`extras` always empty) | 6 |
 | fail-closed jq replaced by the B4 `// []` defaulting | 5 |
-| wholly-failed survey downgraded from fatal (2) to finding (1) | 2 |
-| partial failure over-escalated to fatal | 1 |
-| `checks_for` tri-state: unmanaged collapsed into protection-only | 6 |
+| wholly-failed survey downgraded from fatal (2) to finding (1) | 3 |
+| partial failure over-escalated to fatal | 2 |
+| `checks_for` tri-state: unmanaged collapsed into protection-only | 7 |
 | `--check`/`--allow-check-removal` exclusion removed | 2 |
 | exclusion downgraded from exit 2 to exit 1 | 1 |
-| G4: explicitly-named unmanaged repo no longer an error | 2 |
-| G4: `EXPLICIT_REPOS` lost after `--` | 1 |
+| G4: explicitly-named unmanaged repo no longer an error | 3 |
+| G4: `EXPLICIT_REPOS` lost after `--` | 3 |
 | protection-only `enforce_admins` true → false | 1 |
 | has-checks default `enforce_admins` false → true | 1 |
-| registry `enforce_admins` true → false | 1 |
+| registry `enforce_admins` true → false | 2 |
 | protection PUT attempted before the settings PATCH | 3 |
-| registry checks no longer pinned to an `app_id` | 3 |
+| registry checks no longer pinned to an `app_id` | 5 |
 | UNREGISTERED: flag never accumulated | 2 |
 | UNREGISTERED: exclusion subtraction removed | 4 |
 | UNREGISTERED: unreadable listing no longer an error (fail-open) | 2 |
@@ -188,18 +188,20 @@ suite to fail on each (killer sets for all but the original four were *measured*
 | UNREGISTERED: org enumerated even when repos are named | 6 |
 | UNREGISTERED: accounted-for-repo sanity check removed | 2 |
 | baseline: empty `required` accepted | 1 |
-| baseline: status 3 (remote baseline) treated as protection-only | 36 |
-| baseline: `app_id` null accepted | 3 |
+| baseline: status 3 (remote baseline) treated as protection-only | 43 |
+| baseline: `app_id` validation removed (any value accepted) | 6 |
 | baseline: unreadable baseline not an error in `--check` | 1 |
-| baseline: apply carries on silently when the baseline is unreadable | 16 |
+| baseline: apply carries on silently when the baseline is unreadable | 23 |
 | baseline: `strict` hardcoded true | 1 |
 | baseline: raw media type not requested | 20 |
+| baseline: control characters in a context accepted | 1 |
+| baseline: `app_id` -1 / 0 accepted (positive check removed) | 3 |
 
-(The 36-killer row is deliberately broad: if status 3 were ever read as 0 the
+(The 43-killer row is deliberately broad: if status 3 were ever read as 0 the
 empty list would mean "protection-only" and `required_status_checks:null` would
 wipe every registry check. It is a hazard guard, not a precision mutant.)
 
-**Honest coverage:** 57 distinct assertions of 136 are mutation-measured
+**Honest coverage:** 77 distinct assertions of 143 are mutation-measured
 (acdp-ci#22 asked for the guards with zero coverage, not one mutant per
 assertion — all five it listed are now covered; one mutant per guard variant,
 not the plan's two for `enforce_admins`-registry and `app_id`). The rest are unmeasured, not

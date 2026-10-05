@@ -1039,6 +1039,13 @@ check_bad_baseline "non-boolean pending_settings" "$(jq -c '.pending_settings=1'
 check_bad_baseline "duplicate contexts" "$(jq -c '.required += [.required[0]]' "$GOOD_BASE")"
 check_bad_baseline "context both required and advisory_pending" "$(jq -c '.advisory_pending=["rustfmt"]' "$GOOD_BASE")"
 check_bad_baseline "advisory_pending not an array of strings" "$(jq -c '.advisory_pending=[1]' "$GOOD_BASE")"
+check_bad_baseline "advisory_pending present but not an array" "$(jq -c '.advisory_pending=false' "$GOOD_BASE")"
+check_bad_baseline "context with an embedded newline (would split into two names in the drift guard)" "$(jq -c '.required[0].context="rustfmt\nclippy"' "$GOOD_BASE")"
+check_bad_baseline "context that is only a newline (would empty the list -> protection-only PUT)" "$(jq -c '.required |= [{"context":"\n","app_id":15368}]' "$GOOD_BASE")"
+check_bad_baseline "whitespace-only context" "$(jq -c '.required[0].context="   "' "$GOOD_BASE")"
+check_bad_baseline "app_id -1 (any app: unpins the check)" "$(jq -c '.required[0].app_id=-1' "$GOOD_BASE")"
+check_bad_baseline "app_id 0" "$(jq -c '.required[0].app_id=0' "$GOOD_BASE")"
+check_bad_baseline "app_id beyond a safe integer" "$(jq -c '.required[0].app_id=4503599627370496' "$GOOD_BASE")"
 
 # A4: file ahead of live -> PENDING; file behind live -> DRIFT and apply is blocked.
 FX="$(new_registry_fx)"
