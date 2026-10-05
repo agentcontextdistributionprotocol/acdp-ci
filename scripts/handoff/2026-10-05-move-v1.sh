@@ -13,21 +13,22 @@ REPO=agentcontextdistributionprotocol/acdp-ci
 OLD_TAG_OBJ=$(git ls-remote --tags origin | awk '$2=="refs/tags/v1"{print $1}')
 OLD_COMMIT=$(git ls-remote --tags origin | awk '$2=="refs/tags/v1^{}"{print $1}')
 [ -n "$OLD_TAG_OBJ" ] && [ -n "$OLD_COMMIT" ] || { echo "cannot read current v1 (tag object/peeled commit) — STOP" >&2; exit 1; }
-git fetch -q origin main
+git fetch -q origin main '+refs/tags/v1:refs/tags/v1'   # keeps the old tag object locally for rollback
 NEW_SHA=$(git rev-parse origin/main)
 
 handoff_begin "move v1 ${OLD_COMMIT:0:7} -> ${NEW_SHA:0:7}" \
   "git push origin \"+${OLD_TAG_OBJ}:refs/tags/v1\"   # restores tag object ${OLD_TAG_OBJ} (needs tag-ruleset bypass if active)"
 say "   rollback anchor: tag object $OLD_TAG_OBJ, commit $OLD_COMMIT  (paste into the PR thread)"
 say "   ships:"; git log --oneline "$OLD_COMMIT..$NEW_SHA" | tee -a "$LOG"
+say "   workflow/action diff:"; git diff --stat "$OLD_COMMIT..$NEW_SHA" -- .github/workflows actions | tee -a "$LOG"
 
 is_ff()          { git merge-base --is-ancestor "$OLD_COMMIT" "$NEW_SHA"; }
 has_file()       { git cat-file -e "$NEW_SHA:$1"; }
-prs_merged()     { for n in 34 35 36 37 38 39; do [ "$(gh pr view "$n" --repo "$REPO" --json state -q .state)" = MERGED ] || { echo "PR #$n not merged"; return 1; }; done; }
+prs_merged()     { for n in 34 35 36 37 38 39; do [ "$(gh pr view "$n" --repo "$REPO" --json state,baseRefName -q '"\(.state) \(.baseRefName)"')" = "MERGED main" ] || { echo "PR #$n not merged into main"; return 1; }; done; }
 move_tag()       { git tag -f -a v1 -m "acdp-ci v1" "$NEW_SHA" && git push origin refs/tags/v1 --force; }
 peeled_is_new()  { [ "$(git ls-remote --tags origin | awk '$2=="refs/tags/v1^{}"{print $1}')" = "$NEW_SHA" ]; }
 
-verify "all sweep PRs (#34-#39) are merged" prs_merged
+verify "all sweep PRs (#34-#39) are merged into main" prs_merged
 verify "new tip is a fast-forward of the current v1" is_ff
 verify "new tip carries actions/npm-relock/action.yml" has_file actions/npm-relock/action.yml
 verify "new tip carries actions/auto-merge-gate/action.yml" has_file actions/auto-merge-gate/action.yml
