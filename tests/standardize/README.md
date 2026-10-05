@@ -188,7 +188,7 @@ suite to fail on each (killer sets for the last sixteen were *measured*, not gue
 | UNREGISTERED: org enumerated even when repos are named | 6 |
 | UNREGISTERED: accounted-for-repo sanity check removed | 2 |
 
-**Honest coverage:** 38 distinct assertions of 108 are mutation-measured
+**Honest coverage:** 43 distinct assertions of 108 are mutation-measured
 (acdp-ci#22 asked for the guards with zero coverage, not one mutant per
 assertion — all five it listed are now covered; one mutant per guard variant,
 not the plan's two for `enforce_admins`-registry and `app_id`). The rest are unmeasured, not
