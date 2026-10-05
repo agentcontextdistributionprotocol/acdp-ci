@@ -169,7 +169,8 @@ G4: --check -- <typo'd repo> makes zero gh calls at all
 G4: --check <typo'd repo> exits non-zero instead of a false all-clear
 G4: --check <typo'd repo> makes zero gh calls at all
 unmanaged: acdp-rs skipped with the expected message
-unmanaged: zero gh calls at all"
+unmanaged: zero gh calls at all
+G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
 
 # 6. --check / --allow-check-removal mutual exclusion (exit 2).
 apply_mutant "mutual exclusion removed (--check honours --allow-check-removal)" \
@@ -192,13 +193,15 @@ apply_mutant "G4: explicitly-named unmanaged repo no longer an error" \
     fi
     continue' \
   "G4: --check -- <typo'd repo> exits non-zero instead of a false all-clear
-G4: --check <typo'd repo> exits non-zero instead of a false all-clear"
+G4: --check <typo'd repo> exits non-zero instead of a false all-clear
+G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
 apply_mutant "G4: EXPLICIT_REPOS tracking lost after the -- terminator" \
   '    EXPLICIT_REPOS=1
     continue' '    :
     continue' \
   "G4: --check -- <managed repo> works normally
-G4: --check -- <typo'd repo> makes zero gh calls at all"
+G4: --check -- <typo'd repo> makes zero gh calls at all
+G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
 
 # 8. enforce_admins differs between the protection-only and has-checks bodies.
 apply_mutant "protection-only body: enforce_admins true -> false" \

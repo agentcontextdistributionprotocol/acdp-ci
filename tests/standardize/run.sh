@@ -924,6 +924,20 @@ FIXTURES="$U_FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-ci >/dev/nul
 grep -q "orgs/" "$LOG" && fail "B7: apply mode makes no org enumeration call" "found orgs/ in log" || pass "B7: apply mode makes no org enumeration call"
 rm -rf "$U_FX"
 
+# G4 (strengthened after #19): the `--` terminator must keep EXPLICIT_REPOS, or
+# `--check -- <typo>` falls through to the full default sweep and, against a
+# clean org, exits 0 -- a false all-clear. Offline this needs a fully clean
+# sweep fixture: without one the fall-through fails for an unrelated reason
+# (missing fixtures) and the exit-non-zero assertion is vacuous.
+G4_FX="$(mktemp -d)"; build_clean_sweep "$G4_FX"; write_org_listing "$G4_FX"
+out="$(FIXTURES="$G4_FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check -- acdp-typo 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "not in the standard set"; then
+  pass "G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
+else
+  fail "G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)" "rc=$rc out=$out"
+fi
+rm -rf "$G4_FX"
+
 # B8: a repo that is both managed and excluded is a config error (exit 2).
 CFG_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/std-cfg.XXXXXX")"
 sed 's/^EXCLUDED_REPOS="acdp-rs acdp-website"/EXCLUDED_REPOS="acdp-rs acdp-ci acdp-website"/' "$STANDARDIZE" > "$CFG_SCRIPT"
