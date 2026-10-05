@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Shadow `npm` for tests/bump-npm/run.sh. Models only what relock.sh calls and
+# the real behaviours that matter (reproduced against real npm for acdp-ci#28):
+#   - `install --package-lock-only` exits 0 but SILENTLY omits optional deps
+#     that are not published yet;
+#   - `ci --dry-run` exits 1 with EUSAGE "Missing: … from lock file".
+# State lives in $FAKE: optionals.json ({name: spec}, optionals of $PKG@$T),
+# published (lines "name@version"), counter files.
+#   FAKE_VIEW_FAIL=1            `view … optionalDependencies` errors
+#   FAKE_VIEW_RAW=<text>        verbatim output for that view
+#   FAKE_PUBLISH_AFTER_VIEWS=k  after k `view … version` calls everything publishes
+#   FAKE_INSTALL_CORRUPT=1      install leaves an unparseable lock
+#   FAKE_INSTALL_LOCK=<file>    install writes exactly this lock
+#   FAKE_INSTALL_NEWER=1        install resolves every optional to 0.14.5 (newer in-range release)
+#   FAKE_CI_LENIENT=1           ci --dry-run always succeeds (isolates relock.sh's own lock check)
+#   FAKE_CI_FAIL=1              `ci --dry-run` fails even for a complete lock
+#   FAKE_INSTALL_DROP=<name>    install never records <name> (stale-metadata model)
+set -euo pipefail
+: "${FAKE:?}"
+echo "npm $*" >> "$FAKE/calls.log"
+cmd="$1"; shift
+published() { grep -qxF "$1@$2" "$FAKE/published" 2>/dev/null; }
+publish_all() { jq -r 'to_entries[]|"\(.key)@\(.value)"' "$FAKE/optionals.json" >> "$FAKE/published"; }
+case "$cmd" in
+  view)
+    target="$1"; field="${2:-version}"
+    if [ "$field" = "optionalDependencies" ]; then
+      [ "${FAKE_VIEW_FAIL:-0}" = 1 ] && { echo "npm error E500" >&2; exit 1; }
+      if [ -n "${FAKE_VIEW_RAW+x}" ]; then printf '%s' "$FAKE_VIEW_RAW"; exit 0; fi
+      [ -s "$FAKE/optionals.json" ] && [ "$(jq 'length' "$FAKE/optionals.json")" != 0 ] && cat "$FAKE/optionals.json"
+      exit 0
+    fi
+    n=$(cat "$FAKE/views" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$FAKE/views"
+    if [ -n "${FAKE_PUBLISH_AFTER_VIEWS:-}" ] && [ "$n" -gt "$FAKE_PUBLISH_AFTER_VIEWS" ]; then
+      [ -f "$FAKE/did_publish" ] || { publish_all; touch "$FAKE/did_publish"; }
+    fi
+    name="${target%@*}"; ver="${target##*@}"
+    if published "$name" "$ver"; then echo "$ver"; exit 0; fi
+    echo "npm error E404" >&2; exit 1 ;;
+  install)
+    if [ -n "${FAKE_INSTALL_LOCK:-}" ]; then cp "$FAKE_INSTALL_LOCK" package-lock.json; exit 0; fi
+    if [ "${FAKE_INSTALL_CORRUPT:-0}" = 1 ]; then echo 'not json' > package-lock.json; exit 0; fi
+    [ -f package-lock.json ] || echo '{"packages":{}}' > package-lock.json
+    tmp=$(mktemp)
+    jq --slurpfile o "$FAKE/optionals.json" --arg drop "${FAKE_INSTALL_DROP:-}" --arg newer "${FAKE_INSTALL_NEWER:-0}" --rawfile pub "$FAKE/published" '
+      ($pub|split("\n")) as $p
+      | reduce ($o[0]|to_entries[]) as $e (.;
+          if ($e.key != $drop) and (($p|index($e.key+"@"+$e.value)) != null)
+          then .packages["node_modules/"+$e.key]={version:(if $newer=="1" then "0.14.5" else $e.value end)} else . end)' \
+      package-lock.json > "$tmp" && mv "$tmp" package-lock.json ;;
+  ci)
+    [ "${FAKE_CI_LENIENT:-0}" = 1 ] && exit 0
+    [ "${FAKE_CI_FAIL:-0}" = 1 ] && { echo "npm error code EUSAGE" >&2; exit 1; }
+    miss=$(jq -r --slurpfile o "$FAKE/optionals.json" '. as $l | [$o[0]|keys[] as $k | select(([$l.packages|keys[]|select(.=="node_modules/"+$k or endswith("/node_modules/"+$k))]|length)==0) | $k] | join(", ")' package-lock.json)
+    if [ -n "$miss" ]; then echo "npm error code EUSAGE" >&2; echo "npm error Missing: $miss from lock file" >&2; exit 1; fi ;;
+  *) echo "fake npm: unsupported $cmd" >&2; exit 98 ;;
+esac

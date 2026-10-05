@@ -1,0 +1,33 @@
+name: npm-relock
+description: >-
+  Re-lock an npm consumer after a bump rewrote package.json, waiting for every
+  optional (platform) dependency of the target version to be published and
+  failing closed if the lockfile would not pass `npm ci`. See relock.sh.
+
+inputs:
+  package:
+    description: 'SDK package name as it appears in the consumer manifest.'
+    required: true
+  version:
+    description: 'Target version already written into package.json.'
+    required: true
+  attempts:
+    description: 'Max relock/verify attempts.'
+    required: false
+    default: '12'
+  sleep:
+    description: 'Seconds between attempts.'
+    required: false
+    default: '15'
+
+runs:
+  using: composite
+  steps:
+    - name: Relock and verify
+      shell: bash
+      env:
+        PKG: ${{ inputs.package }}
+        T: ${{ inputs.version }}
+        RELOCK_ATTEMPTS: ${{ inputs.attempts }}
+        RELOCK_SLEEP: ${{ inputs.sleep }}
+      run: ${{ github.action_path }}/relock.sh
