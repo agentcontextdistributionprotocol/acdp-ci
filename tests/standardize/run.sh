@@ -750,6 +750,78 @@ fi
 rm -rf "$NOJQ_BIN"
 
 echo
+echo "== #22 / #30: stub honesty, enforce_admins bodies, acdp-rs never touched =="
+
+# --- the stub must LOG a call even when $FIXTURES is unset, or every "zero gh
+#     calls at all" assertion run without FIXTURES is vacuous. ---
+LOG="$(new_log)"
+( unset FIXTURES; GH_LOG="$LOG" gh api repos/x/y >/dev/null 2>&1 )
+if [ -s "$LOG" ] && grep -q "gh api repos/x/y" "$LOG"; then
+  pass "stub: a call made with FIXTURES unset is still logged (zero-call assertions can fail)"
+else
+  fail "stub: a call made with FIXTURES unset is still logged" "GH_LOG empty: $(cat "$LOG")"
+fi
+
+put_body_of() { awk '/^gh api -X PUT/{getline; if ($0 ~ /^STDIN: /) { sub(/^STDIN: /, ""); print; exit }}' "$1"; }
+
+# --- EA1: the protection-only body asserts enforce_admins:true and no checks.
+FX="$FIXTURES_ROOT/unprotected"
+LOG="$(new_log)"
+FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-ci >/dev/null 2>&1
+ea1="$(put_body_of "$LOG" | jq -c '[.enforce_admins,.required_status_checks]' 2>/dev/null)"
+if [ "$ea1" = "[true,null]" ]; then
+  pass "EA1: protection-only PUT (acdp-ci) sets enforce_admins:true and required_status_checks:null"
+else
+  fail "EA1: protection-only PUT (acdp-ci) sets enforce_admins:true and required_status_checks:null" "got '$ea1'"
+fi
+
+# --- EA2: a has-checks repo that is not the registry gets enforce_admins:false
+#     and a contexts-only (unpinned) required_status_checks.
+FX="$FIXTURES_ROOT/playground-exact"
+LOG="$(new_log)"
+FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-playground >/dev/null 2>&1
+ea2="$(put_body_of "$LOG" | jq -c '[.enforce_admins,(.required_status_checks|has("checks")),(.required_status_checks|has("contexts"))]' 2>/dev/null)"
+if [ "$ea2" = "[false,false,true]" ]; then
+  pass "EA2: has-checks PUT (acdp-playground) sets enforce_admins:false with contexts and no checks pinning"
+else
+  fail "EA2: has-checks PUT (acdp-playground) sets enforce_admins:false with contexts and no checks pinning" "got '$ea2'"
+fi
+
+# --- #30: a full apply sweep never touches acdp-rs, and no mutating call ever
+#     targets a contents/ path (standardize.sh does not write files).
+CLEAN_FX="$(mktemp -d)"
+write_insync_fixture "$CLEAN_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
+write_insync_fixture "$CLEAN_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
+write_insync_fixture "$CLEAN_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
+write_insync_fixture "$CLEAN_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+write_insync_fixture "$CLEAN_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
+write_insync_fixture "$CLEAN_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
+write_unprotected_fixture "$CLEAN_FX" acdp-ci
+write_unprotected_fixture "$CLEAN_FX" .github
+LOG="$(new_log)"
+FIXTURES="$CLEAN_FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" >/dev/null 2>&1
+rc=$?
+nmut="$(count_mutations "$LOG")"
+if [ "$rc" -eq 0 ] && [ "$nmut" -ge 16 ]; then
+  pass "#30: full apply sweep ran (16 mutating calls recorded) -- the next assertions are not vacuous"
+else
+  fail "#30: full apply sweep ran" "rc=$rc mutations=$nmut"
+fi
+if grep -Eq '/acdp-rs(/| |$)' "$LOG"; then
+  fail "#30: no gh call during a full sweep ever targets acdp-rs" "$(grep -E '/acdp-rs(/| |$)' "$LOG")"
+else
+  pass "#30: no gh call during a full sweep ever targets acdp-rs"
+fi
+# A write is an explicit -X/--method, OR (real gh) any -f/-F/--input body, which
+# flips the call to POST without an -X. Match all of them.
+if grep -E -- '/contents/' "$LOG" | grep -Eq -- '(^| )((-X|--method) (PATCH|PUT|POST|DELETE)|-f|-F|--input)( |$)'; then
+  fail "#30: no mutating call targets a contents/ path (standardize.sh never writes files)" "found"
+else
+  pass "#30: no mutating call targets a contents/ path (standardize.sh never writes files)"
+fi
+rm -rf "$CLEAN_FX"
+
+echo
 echo "===================="
 echo "  $pass_count passed, $fail_count failed"
 echo "===================="
