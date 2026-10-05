@@ -9,11 +9,12 @@ repo stays uniform instead of drifting.
 | Reusable workflow | Purpose |
 |---|---|
 | [`.github/workflows/auto-merge.yml`](.github/workflows/auto-merge.yml) | Auto-merge Dependabot PRs once required checks pass. Patch + minor unattended; **majors held** for review. |
-| [`.github/workflows/bump-consume.yml`](.github/workflows/bump-consume.yml) | Consume a new `acdp` SDK release: resolve → wait for registry → bump manifest + lockfile → PR → arm auto-merge. Ecosystems: `npm`, `cargo`, `uv`. |
+| [`.github/workflows/bump-consume.yml`](.github/workflows/bump-consume.yml) | Consume a new `acdp` SDK release: resolve → wait for registry → bump manifest + lockfile (npm: wait for all platform packages, relock, verify `npm ci --dry-run`, fail closed) → PR → arm auto-merge. Ecosystems: `npm`, `cargo`, `uv`. |
 | [`.github/workflows/bump-spec-ref.yml`](.github/workflows/bump-spec-ref.yml) | Adopt a new pinned ACDP spec SHA: rewrite the pinned `ref:` in a target workflow file → PR. **Held, never auto-merged** — the PR's own conformance CI runs against the new fixtures, and a human adopts the new spec deliberately. |
 
 | Composite action | Purpose |
 |---|---|
+| [`actions/npm-relock`](actions/npm-relock/relock.sh) | Used by `bump-consume.yml` (npm): wait for every optional platform package of the target, relock, and verify `npm ci --dry-run`; fails closed. `bump-consume.yml` also takes a `node-version` input (default `22`; match the consumer's CI). |
 | [`actions/checkout-spec`](actions/checkout-spec/README.md) | Check out the ACDP spec at a SHA-verified pinned ref, **inside your own job** (a `uses:` step, not a separate reusable-workflow job) — exports `ACDP_SPEC_DIR` and a `path` output. See [DELIVERY-STANDARD.md](DELIVERY-STANDARD.md) for the adoption recipe. |
 
 | Script | Purpose |

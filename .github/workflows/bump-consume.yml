@@ -44,6 +44,11 @@ on:
         required: false
         type: string
         default: ''
+      node-version:
+        description: 'Node version for the npm ecosystem; match the consumer''s CI so the lockfile is written by the same npm major'
+        required: false
+        type: string
+        default: '22'
       allow-major:
         description: 'Arm auto-merge even on a major bump'
         required: false
@@ -53,6 +58,7 @@ on:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions: {}
     steps:
       - name: Mint GitHub App token
@@ -71,7 +77,7 @@ jobs:
       - uses: actions/setup-node@v7
         if: ${{ inputs.ecosystem == 'npm' }}
         with:
-          node-version: '22'
+          node-version: ${{ inputs.node-version }}
 
       - name: Resolve versions
         id: v
@@ -97,9 +103,11 @@ jobs:
             cargo) CURRENT=$(awk -v p="$PKG" '$0=="name = \""p"\""{f=1} f&&/^version = /{v=$0;sub(/^version = "/,"",v);sub(/"$/,"",v);print v;exit}' Cargo.lock) ;;
             uv)    CURRENT=$(awk -v p="$PKG" '$0=="name = \""p"\""{f=1} f&&/^version = /{v=$0;sub(/^version = "/,"",v);sub(/"$/,"",v);print v;exit}' uv.lock) ;;
           esac
-          echo "target=$TARGET"   >> "$GITHUB_OUTPUT"
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "branch=deps/acdp-$TARGET" >> "$GITHUB_OUTPUT"
+          {
+            echo "target=$TARGET"
+            echo "current=$CURRENT"
+            echo "branch=deps/${PKG##*/}-$TARGET"
+          } >> "$GITHUB_OUTPUT"
           # major-ish for 0.x = a minor change; otherwise a major change
           major() { echo "${1%%.*}"; }; minor() { echo "$1" | cut -d. -f2; }
           BREAKING=false
@@ -146,7 +154,8 @@ jobs:
           case "$ECO" in
             npm)
               # Rewrite every dependency entry that points at PKG — covers both
-              # the real name and any `npm:PKG@…` alias — then re-lock.
+              # the real name and any `npm:PKG@…` alias. The re-lock happens in
+              # the next step (npm-relock), which verifies the lock fails closed.
               node -e '
                 const fs=require("fs"), pkg=process.env.PKG, T=process.env.T;
                 const j=JSON.parse(fs.readFileSync("package.json","utf8"));
@@ -158,8 +167,7 @@ jobs:
                   }
                 }
                 fs.writeFileSync("package.json", JSON.stringify(j,null,2)+"\n");
-              '
-              npm install --package-lock-only ;;
+              ' ;;
             cargo)
               command -v cargo >/dev/null || { curl -fsSL --proto "=https" --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1; }
               source "$HOME/.cargo/env" 2>/dev/null || true
@@ -181,6 +189,16 @@ jobs:
               uv lock --upgrade-package "$PKG" ;;
           esac
 
+      # npm only: wait for every platform (optional) package of the target,
+      # relock, and verify `npm ci` would accept the lock. Fails the job — and
+      # so opens no PR — if the lock is not installable (acdp-ci#28).
+      - name: Re-lock and verify (npm)
+        if: ${{ inputs.ecosystem == 'npm' && steps.v.outputs.changed == 'true' && steps.br.outputs.exists == 'false' }}
+        uses: agentcontextdistributionprotocol/acdp-ci/actions/npm-relock@v1
+        with:
+          package: ${{ inputs.package }}
+          version: ${{ steps.v.outputs.target }}
+
       - name: Open PR + arm auto-merge
         if: ${{ steps.v.outputs.changed == 'true' && steps.br.outputs.exists == 'false' }}
         env:
@@ -189,6 +207,7 @@ jobs:
           CUR: ${{ steps.v.outputs.current }}
           T: ${{ steps.v.outputs.target }}
           BREAKING: ${{ steps.v.outputs.breaking }}
+          PKG: ${{ inputs.package }}
           ALLOW_MAJOR: ${{ inputs.allow-major }}
         run: |
           set -euo pipefail
@@ -196,12 +215,13 @@ jobs:
           git config user.email '${{ steps.app.outputs.app-slug }}[bot]@users.noreply.github.com'
           git checkout -b "$BR"
           git add -A
-          git commit -m "chore(deps): bump acdp to $T"
+          NAME="${PKG##*/}"
+          git commit -m "chore(deps): bump $NAME to $T"
           git push -u origin "$BR"
           NOTE=""; [ "$BREAKING" = "true" ] && NOTE=$'\n\n> ⚠️ **Breaking bump held** — auto-merge is NOT armed; review and merge manually.'
           gh pr create --base "${GITHUB_REF_NAME}" --head "$BR" \
-            --title "chore(deps): bump acdp to $T" \
-            --body "Event-driven bump of \`acdp\` $CUR → $T, dispatched on publish.$NOTE"
+            --title "chore(deps): bump $NAME to $T" \
+            --body "Event-driven bump of \`$PKG\` $CUR → $T, dispatched on publish.$NOTE"
           if [ "$ALLOW_MAJOR" = "true" ] || [ "$BREAKING" = "false" ]; then
             # Same guard as auto-merge.yml (CI-6): refuse to arm GitHub's native
             # auto-merge on a branch with no required status checks configured —

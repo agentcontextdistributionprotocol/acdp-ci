@@ -115,3 +115,11 @@
 - **Blast radius if wrong:** low — one line per adopter to reverse; affects
   an org-wide convention, so worth a human confirm.
 - **Status:** CONFIRMED (2026-09-05) — see DECISIONS.md.
+
+## bump-consume npm relock defaults
+- **Plan:** plans/open-issues-sweep.md
+- **Assumed:** 12 attempts x 15s (~3 min) is enough for platform packages to publish after the main package; `node-version` default '22' stays; presence-only lock check plus `npm ci --dry-run` is sufficient verification.
+- **Chose:** composite action `actions/npm-relock` referenced at `@v1`; job `timeout-minutes: 15` (also applies to cargo/uv paths).
+- **Alternatives:** exposing attempts/sleep as workflow inputs; auto-detecting node version from consumer; exact-version equality.
+- **Blast radius if wrong:** a slow publish makes the bump job fail (re-run fixes it); no bad PR is ever opened.
+- **Status:** UNCONFIRMED

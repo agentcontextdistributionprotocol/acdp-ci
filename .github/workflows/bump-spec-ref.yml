@@ -100,10 +100,12 @@ jobs:
             echo "::error file=$FILE::bump-spec-ref: found $ANCHOR_COUNT spec-pin anchors in $FILE — this workflow only rewrites the first and would silently leave the rest stale. Not supported today; bump the others by hand in the same PR. (If this is really only ONE checkout-spec step, an explicit 'repository:' override in its 'with:' block also counts as an anchor and can trigger this on a single step — drop the override to use the action's default, or bump this file by hand.)" >&2
             exit 1
           fi
-          echo "sha=$SHA"                  >> "$GITHUB_OUTPUT"
-          echo "short=${SHA:0:7}"          >> "$GITHUB_OUTPUT"
-          echo "cur=$CUR"                  >> "$GITHUB_OUTPUT"
-          echo "branch=deps/spec-${SHA:0:12}" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=$SHA"
+            echo "short=${SHA:0:7}"
+            echo "cur=$CUR"
+            echo "branch=deps/spec-${SHA:0:12}"
+          } >> "$GITHUB_OUTPUT"
           if [ "$SHA" = "$CUR" ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; echo "Spec ref already at $SHA."; else echo "changed=true" >> "$GITHUB_OUTPUT"; echo "spec ${CUR:-none} -> $SHA"; fi
 
       - name: Branch already open?
