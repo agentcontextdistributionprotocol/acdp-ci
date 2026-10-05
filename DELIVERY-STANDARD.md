@@ -90,12 +90,10 @@ anchored by the release-plz tag alone, not by an attestation.
 
 ```
                      ┌─ crate (release-plz) ─▶ dispatch  ▶ acdp-registry-rs   → cargo add acdp@X
-acdp-rs publishes ───┼─ npm   (bindings)     ─▶ dispatch* ▶ acdp-control-plane → npm re-lock
-                     ├─ py    (py-release)   ─▶ dispatch* ▶ acdp-playground    → uv lock --upgrade
+acdp-rs publishes ───┼─ npm   (bindings)     ─▶ dispatch  ▶ acdp-control-plane → npm re-lock
+                     ├─ py    (py-release)   ─▶ dispatch  ▶ acdp-playground    → uv lock --upgrade
                      └─ wasm  (wasm-release) ─▶ dispatch  ▶ acdp-ui-console    → npm re-lock (acdp-wasm)
 
-* skipped on every real release today, not just an edge case — see the known-gap
-  paragraph below.
 ```
 
 The wasm lane is the fourth consumer lane: it publishes the *distinct* package
@@ -116,42 +114,45 @@ pattern silently stopped matching after a rename) — but that same comment says
 "Dependabot itself rarely proposes updates for this dep" regardless of grouping, and in
 practice `acdp-control-plane` sat stale for months despite the group (see the known-gap
 paragraph below), so treat this as a weak, unproven net rather than a guaranteed one.
-`acdp-playground` has no net at all, by explicit design: `.github/dependabot.yml`
+`acdp-ui-console`'s net is its npm group: patches flow, `acdp-wasm` 0.x minors are
+ignored by Dependabot on purpose (`acdp-ui-console#136`), so a minor bump only arrives
+through the dispatch-driven PR. `acdp-playground` has no net at all, by explicit design: `.github/dependabot.yml`
 `ignore`s the `acdp` dependency by name outright (bumping it is a semantic surface
 change, not a mechanical one).
 
-**Known gap, already tracked in `acdp-rs`, not fixed here:** `acdp-rs`'s standard release
+**Former gap, closed 2026-09-25 (`acdp-rs#302` / `#304`):** `acdp-rs`'s standard release
 path, `.github/workflows/release-plz.yml:129-138`, fires `bindings-release.yml` and
 `acdp-py-release.yml` via `workflow_dispatch` (`-f dry_run=false`) for **every** real
-release — not as an edge case, that's how releases normally happen. Both workflows gate
+release — not as an edge case, that's how releases normally happen. Both workflows used to gate
 their `repository_dispatch: acdp-released` step on `if: ${{ github.event_name ==
 'push' }}` alone (`acdp-py-release.yml`: token-mint `:209`, dispatch `:217`;
 `bindings-release.yml`: token-mint `:238-239`, dispatch `:246-254`), so the notification
-is skipped by construction on every release-plz-driven release. Combined with
+was skipped by construction on every release-plz-driven release. Combined with
 `acdp-playground`'s missing Dependabot fallback above, this is what let its `acdp` pin
 fall six minor versions behind (0.8.3 → 0.14.1, all eight releases since 0.10.0 missed)
 before anyone noticed by hand. `acdp-control-plane` sat pinned at `^0.8.5` against npm's
 `0.14.1` for the same dispatch gate, despite having a Dependabot group that in principle
 covers `acdp` — direct evidence for that group's own "rarely proposes updates for this
-dep" caveat above; its own safety net did not, in fact, save it. Both halves are open,
-independently filed issues —
+dep" caveat above; its own safety net did not, in fact, save it. Both halves were
+independently filed and are now **closed** (both 2026-09-25):
 [acdp-rs#302](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/302)
-(npm/`bindings-release.yml`; the issue links a full fix plan in `acdp-control-plane`, but
-that plan file is currently uncommitted there — same bare `plans/` gitignore pattern this
-repo just fixed in its own `.gitignore` — so the link 404s; see
-`plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how it was actually read) and
+(npm/`bindings-release.yml`) and
 [acdp-rs#304](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/304)
-(PyPI/`acdp-py-release.yml`) — see
-`plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how they relate and one gap in
-`#304`'s own suggested fix that this repo found while cross-checking it.
+(PyPI/`acdp-py-release.yml`); both dispatch steps now gate on
+`push || !inputs.dry_run`. Verified live (2026-10-05): the consumers' `bump acdp`
+workflows ran on `repository_dispatch` on 2026-09-25 and 2026-10-03/04
+(`acdp-control-plane`, `acdp-playground`). See
+`plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how the gap was read and one gap
+in `#304`'s own suggested fix that this repo found while cross-checking it.
+`acdp-playground` still has no Dependabot net by design (above).
 
 **A fourth, differently-shaped gap, closed:**
 `acdp-wasm-release.yml` (npm, `acdp-ui-console`) never had a `#302`/`#304`-style gating
 bug — until [acdp-rs#307](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/307)
 it had no `repository_dispatch: acdp-released` step at all. `acdp-rs#308` (merged
 2026-09-27) added one, correctly: it gates on `if: ${{ always() && steps.publish.outcome
-== 'success' && (github.event_name == 'push' || !inputs.dry_run) }}` — so, unlike the two
-gaps above, it fires on both a tag push *and* a non-dry-run `workflow_dispatch`, and it
+== 'success' && (github.event_name == 'push' || !inputs.dry_run) }}` — so, unlike the earlier
+push-only gap, it fires on both a tag push *and* a non-dry-run `workflow_dispatch`, and it
 derives `VER` from `inputs.version` with a semver guard exactly the way
 `plans/cross-repo/acdp-rs-release-dispatch-gap.md` describes `#302`'s linked plan doing
 for `bindings-release.yml`. The receiver side landed the same day:
@@ -663,7 +664,7 @@ automatic, audit-logged bypass; rollback is one DELETE.
 
 | Repo | Lang | CI caller | auto-merge | Dependabot | bump-acdp | Publish | Graph role |
 |---|---|---|---|---|---|---|---|
-| acdp-rs | Rust | own ci | ✅ | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / crate+wasm dispatch correctly, npm+py don't (push-only gate) — see propagation graph** |
+| acdp-rs | Rust | own ci | ✅ | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / all four lanes dispatch — see propagation graph** |
 | acdp-registry-rs | Rust | own ci | ✅ | cargo+ga | cargo | Docker + crate | consumes crate |
 | acdp-control-plane | npm | own ci | ✅ | npm+docker+ga | npm | Docker | consumes npm |
 | acdp-playground | Python/uv | own ci | ✅ | uv+ga | uv | Docker | consumes py |
