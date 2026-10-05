@@ -422,7 +422,8 @@ Consumes a family package via npm → additionally:
 
 The jobs satisfying this bar are the **required status checks** on `main`
 (configured by `scripts/standardize.sh`, which now refuses to remove a live
-required check it doesn't declare), so a red gate blocks the merge and
+required check it doesn't declare; for acdp-registry-rs the declared list is read
+from that repo's own `.github/required-checks.json`, validated fail-closed), so a red gate blocks the merge and
 auto-merge never overrides it. acdp-rs exceeds this baseline. New SDK repos
 (Java / Go / Kotlin) inherit the bar, satisfied by their own ecosystem's tools.
 

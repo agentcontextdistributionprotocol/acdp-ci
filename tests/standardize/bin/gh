@@ -45,6 +45,7 @@ api_path=""
 read_stdin=0
 input_file=""
 f_pairs=""   # -F key=value pairs, newline-separated (typed: true/false/number/null coerced)
+accept_raw=0   # set by -H "Accept: application/vnd.github.raw…"
 lf_pairs=""  # -f key=value pairs, newline-separated (always string)
 
 # Positional argv parser. MUST consume the arguments of -F, -f, -H, --input,
@@ -61,6 +62,9 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     -H)
+      case "$2" in
+        [Aa]ccept:*application/vnd.github.raw*) accept_raw=1 ;;
+      esac
       shift 2
       ;;
     -F)
@@ -139,6 +143,15 @@ if [ "$is_mutation" -eq 0 ]; then
     exit 1
   fi
   content="$(cat "$fixture_file")"
+  # Real contents API: without the raw media type you get a base64 envelope,
+  # not the file. Model that so "header dropped" is a behavioural test.
+  case "$api_path" in
+    */contents/*)
+      if [ "$accept_raw" -ne 1 ]; then
+        content="$(jq -nc --arg c "$(printf '%s' "$content" | base64)" '{type:"file",encoding:"base64",content:$c}')"
+      fi
+      ;;
+  esac
   apply_jq "$content"
   rc=$?
   exit "$rc"

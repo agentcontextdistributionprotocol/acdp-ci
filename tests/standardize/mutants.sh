@@ -112,7 +112,9 @@ apply_mutant "drift detection disabled (extras always empty)" \
   'case1: no mutation reaches gh (guard precedes PATCH)
 case1: undeclared 5th live check blocks apply and names it
 G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear
-override: --allow-check-removal lets a drifted apply complete'
+override: --allow-check-removal lets a drifted apply complete
+A4: apply is blocked by that DRIFT
+A4: baseline behind live -> DRIFT'
 
 # 2. The B4 fail-open. On a permission-degraded read this yields [], which
 #    reads as "no extras" and lets the destructive PUT proceed. This is the
@@ -144,14 +146,273 @@ apply_mutant "wholly-failed survey downgraded from fatal (2) to finding (1)" \
   '    echo "--check: FATAL: all $SURVEYED surveyed repo(s) were unreadable' \
   '    exit 1; echo "--check: FATAL: all $SURVEYED surveyed repo(s) were unreadable' \
   'check: wholly-unreadable survey is fatal (exit 2), and distinct from drift
-fatal: every repo unreadable -> exit 2 and says FATAL in words'
+fatal: every repo unreadable -> exit 2 and says FATAL in words
+A2: --check on the registry alone with no baseline -> exit 2'
 
 # 4. The opposite error: escalating ANY unreadable repo to fatal. One
 #    unreadable repo out of eight is a real finding and must stay reportable.
 apply_mutant "partial failure over-escalated to fatal (any unreadable, not all)" \
   '[ "$UNREADABLE" -eq "$SURVEYED" ]' \
   '[ "$UNREADABLE" -gt 0 ]' \
-  'sweep: partial failure (1 of 8 unreadable) stays a finding, exit 1'
+  'sweep: partial failure (1 of 8 unreadable) stays a finding, exit 1
+A2: sweep with the baseline missing -> exit 1 naming the registry'
+
+
+# --- #22: guards that had zero mutant coverage. Killer sets below were
+#     MEASURED (run, read, then declared), not guessed.
+
+# 5. checks_for() tri-state: an unmanaged repo must be SKIPPED (return 1), not
+#    collapsed into "managed, protection-only" (return 0 + empty) -- which
+#    would PUT required_status_checks:null onto a repo this script does not own.
+apply_mutant "checks_for tri-state: unmanaged collapsed into protection-only" \
+  '      return 0 ;;
+    *) return 1 ;;' '      return 0 ;;
+    *) return 0 ;;' \
+  "G4: --check -- <typo'd repo> exits non-zero instead of a false all-clear
+G4: --check -- <typo'd repo> makes zero gh calls at all
+G4: --check <typo'd repo> exits non-zero instead of a false all-clear
+G4: --check <typo'd repo> makes zero gh calls at all
+unmanaged: acdp-rs skipped with the expected message
+unmanaged: zero gh calls at all
+G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
+
+# 6. --check / --allow-check-removal mutual exclusion (exit 2).
+apply_mutant "mutual exclusion removed (--check honours --allow-check-removal)" \
+  'if [ "$CHECK_MODE" -eq 1 ] && [ "$ALLOW_CHECK_REMOVAL" -eq 1 ]; then' 'if false; then' \
+  "flags: --check --allow-check-removal is rejected outright (exit 2)
+flags: --check --allow-check-removal makes zero gh calls at all"
+apply_mutant "mutual exclusion downgraded from exit 2 to exit 1" \
+  '(--allow-check-removal is apply-mode only)" >&2
+  exit 2' '(--allow-check-removal is apply-mode only)" >&2
+  exit 1' \
+  "flags: --check --allow-check-removal is rejected outright (exit 2)"
+
+# 7. G4: an explicitly-named unmanaged repo must not exit 0 having read nothing.
+apply_mutant "G4: explicitly-named unmanaged repo no longer an error" \
+  'if [ "$CHECK_MODE" -eq 1 ] && [ "$EXPLICIT_REPOS" -eq 1 ]; then
+      ERRORS=1
+    fi
+    continue' 'if [ "$CHECK_MODE" -eq 1 ] && [ "$EXPLICIT_REPOS" -eq 1 ]; then
+      :
+    fi
+    continue' \
+  "G4: --check -- <typo'd repo> exits non-zero instead of a false all-clear
+G4: --check <typo'd repo> exits non-zero instead of a false all-clear
+G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
+apply_mutant "G4: EXPLICIT_REPOS tracking lost after the -- terminator" \
+  '    EXPLICIT_REPOS=1
+    continue' '    :
+    continue' \
+  "G4: --check -- <managed repo> works normally
+G4: --check -- <typo'd repo> makes zero gh calls at all
+G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
+
+# 8. enforce_admins differs between the protection-only and has-checks bodies.
+apply_mutant "protection-only body: enforce_admins true -> false" \
+  '"required_status_checks":null,"enforce_admins":true' '"required_status_checks":null,"enforce_admins":false' \
+  "EA1: protection-only PUT (acdp-ci) sets enforce_admins:true and required_status_checks:null"
+apply_mutant "has-checks default: enforce_admins false -> true" \
+  '        enforce_admins: false,' '        enforce_admins: true,' \
+  "EA2: has-checks PUT (acdp-playground) sets enforce_admins:false with contexts and no checks pinning"
+apply_mutant "registry enforce_admins ignores the baseline (hardcoded false)" \
+  '        enforce_admins: .enforce_admins,' '        enforce_admins: false,' \
+  "case2: registry PUT sets enforce_admins:true (issue #29)
+A1: in-sync registry apply PUTs exactly the baseline file checks"
+
+# 9. Ordering: the repo-settings PATCH must precede the protection PUT.
+apply_mutant "protection PUT attempted before the settings PATCH" \
+  '  gh api -X PATCH "repos/$ORG/$repo" \' '  printf '"'"'%s'"'"' "$protection_json" | gh api -X PUT "repos/$ORG/$repo/branches/$branch/protection" --input - >/dev/null
+  gh api -X PATCH "repos/$ORG/$repo" \' \
+  "bash-3.2 (/bin/bash): standardize.sh runs and blocks identically
+block-mode guard: PATCH was the blocked call
+block-mode guard: PUT never attempted"
+
+# 10. Registry app_id pinning.
+apply_mutant "registry app_id pinning dropped (checks -> contexts)" \
+  'required_status_checks: { strict: .strict, checks: .required },' 'required_status_checks: { strict: .strict, contexts: [.required[].context] },' \
+  "case2: PUT body carries all 11 declared checks
+case2: registry PUT pins every check to app_id 15368 via checks
+override: PUT body reaches the mutation path with the reduced (declared-only) contexts
+A1: in-sync registry apply PUTs exactly the baseline file checks
+A5: PUT takes enforce_admins, strict and app_id from the baseline file"
+
+
+# --- #19: the UNREGISTERED org-registry condition. Killer sets measured.
+apply_mutant "UNREGISTERED: repo found but flag never accumulated" \
+  '        UNREGISTERED=1
+      done' '        :
+      done' \
+  "B2: summary names the unregistered condition
+B2: unregistered repo -> exit 1, named, no DRIFT"
+apply_mutant "UNREGISTERED: exclusion subtraction removed (excluded repos reported)" \
+  'case " $ALL_REPOS $EXCLUDED_REPOS " in *" $name "*) continue ;; esac' 'case " $ALL_REPOS " in *" $name "*) continue ;; esac' \
+  "B1: every org repo accounted for -> exit 0, no UNREGISTERED
+B5: archived extra repo is ignored, and reported as ignored
+G1c: clean full sweep still exits 0, no PENDING marker
+G4 regression guard: default no-arg full sweep --check still exits 0"
+apply_mutant "UNREGISTERED: unreadable org listing no longer an error (fail-open)" \
+  '      ERRORS=1
+    else
+      org_names=' '      :
+    else
+      org_names=' \
+  "B3: unreadable org listing -> exit 1 and says the check did not run
+B4a: empty listing -> exit 1, not a clean pass"
+apply_mutant "UNREGISTERED: escalated to fatal exit 2" \
+  '        UNREGISTERED=1
+      done' '        UNREGISTERED=1; exit 2
+      done' \
+  "B2: summary names the unregistered condition
+B2: unregistered repo -> exit 1, named, no DRIFT"
+apply_mutant "UNREGISTERED: org enumerated even when repos are named" \
+  '  if [ "$EXPLICIT_REPOS" -eq 0 ]; then
+    if ! listing=' '  if true; then
+    if ! listing=' \
+  "B6: --check <repo> makes no org enumeration call
+check: prints the live contexts it read, per repo, even when in sync
+flags: trailing --check is parsed as a flag, not a repo name
+G4: --check -- <managed repo> works normally
+G4: --check -- <typo'd repo> makes zero gh calls at all
+G4: --check <typo'd repo> makes zero gh calls at all"
+apply_mutant "UNREGISTERED: accounted-for-repo sanity check removed" \
+  'if ! printf '"'"'%s\n'"'"' "$org_names" | grep -qxF -- "$acct"; then' 'if false; then' \
+  "B4b: listing missing a managed repo -> exit 1, names it
+B9: stale exclusion -> exit 1, names it"
+
+
+# --- #33 (#29 item 3): the registry baseline. Killer sets measured.
+apply_mutant "baseline: empty required accepted (would wipe every check)" \
+  'if (.required | type) != "array" or (.required | length) == 0 then bad("required must be a non-empty array") else . end' '.' \
+  "A3: empty required (would wipe all checks) -> refused, exit 1, zero mutations"
+apply_mutant "baseline: status 3 (remote baseline) treated as protection-only (0)" \
+  '    acdp-registry-rs)  # remote baseline: its committed .github/required-checks.json
+      return 3 ;;' '    acdp-registry-rs)  # remote baseline: its committed .github/required-checks.json
+      return 0 ;;' \
+  "#30: full apply sweep ran
+A1: in-sync registry apply PUTs exactly the baseline file checks
+A1: says it read the baseline
+A2: --check on the registry alone with no baseline -> exit 2
+A2: missing baseline -> apply exits 1
+A2: sweep with the baseline missing -> exit 1 naming the registry
+A3: a JSON array, not an object -> refused, exit 1, zero mutations
+A3: advisory_pending not an array of strings -> refused, exit 1, zero mutations
+A3: context both required and advisory_pending -> refused, exit 1, zero mutations
+A3: duplicate contexts -> refused, exit 1, zero mutations
+A3: empty required (would wipe all checks) -> refused, exit 1, zero mutations
+A3: empty-string context -> refused, exit 1, zero mutations
+A3: fractional app_id -> refused, exit 1, zero mutations
+A3: invalid JSON -> refused, exit 1, zero mutations
+A3: missing strict -> refused, exit 1, zero mutations
+A3: non-boolean enforce_admins -> refused, exit 1, zero mutations
+A3: non-boolean pending_settings -> refused, exit 1, zero mutations
+A3: non-string context -> refused, exit 1, zero mutations
+A3: null app_id -> refused, exit 1, zero mutations
+A3: required missing -> refused, exit 1, zero mutations
+A3: string app_id -> refused, exit 1, zero mutations
+A4: baseline ahead of live -> PENDING
+A5: PUT takes enforce_admins, strict and app_id from the baseline file
+A6: the contents call asks for the raw media type
+B1: every org repo accounted for -> exit 0, no UNREGISTERED
+B2: unregistered repo -> exit 1, named, no DRIFT
+B5: archived extra repo is ignored, and reported as ignored
+case2: PUT body carries all 11 declared checks
+case2: registry PUT pins every check to app_id 15368 via checks
+case2: registry PUT sets enforce_admins:true (issue #29)
+case2: registry-rs-insync (post-fix) -> exit 0, reports in sync
+check: prints the live contexts it read, per repo, even when in sync
+G1c: clean full sweep still exits 0, no PENDING marker
+G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear
+G4 regression guard: default no-arg full sweep --check still exits 0
+override: PUT body reaches the mutation path with the reduced (declared-only) contexts
+A3: advisory_pending present but not an array -> refused, exit 1, zero mutations
+A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations
+A3: context that is only a newline (would empty the list -> protection-only PUT) -> refused, exit 1, zero mutations
+A3: context with an embedded newline (would split into two names in the drift guard) -> refused, exit 1, zero mutations
+A3: whitespace-only context -> refused, exit 1, zero mutations"
+apply_mutant "baseline: app_id validation removed (any value accepted)" \
+  'type == "number" and . == floor and . > 0 and . < 4503599627370496)' 'true)' \
+  "A3: fractional app_id -> refused, exit 1, zero mutations
+A3: null app_id -> refused, exit 1, zero mutations
+A3: string app_id -> refused, exit 1, zero mutations
+A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations"
+apply_mutant "baseline: unreadable baseline not an error in --check" \
+  '      if [ "$CHECK_MODE" -eq 1 ]; then
+        ERRORS=1
+        UNREADABLE=$((UNREADABLE + 1))
+        continue
+      else
+        echo "!! $repo: aborting before any mutation" >&2' '      if [ "$CHECK_MODE" -eq 1 ]; then
+        :
+        UNREADABLE=$((UNREADABLE + 1))
+        continue
+      else
+        echo "!! $repo: aborting before any mutation" >&2' \
+  "A2: sweep with the baseline missing -> exit 1 naming the registry"
+apply_mutant "baseline: apply carries on silently when the baseline is unreadable" \
+  '        echo "!! $repo: aborting before any mutation" >&2
+        exit 1' '        echo "!! $repo: aborting before any mutation" >&2
+        continue' \
+  "A2: missing baseline -> apply exits 1
+A3: a JSON array, not an object -> refused, exit 1, zero mutations
+A3: advisory_pending not an array of strings -> refused, exit 1, zero mutations
+A3: context both required and advisory_pending -> refused, exit 1, zero mutations
+A3: duplicate contexts -> refused, exit 1, zero mutations
+A3: empty required (would wipe all checks) -> refused, exit 1, zero mutations
+A3: empty-string context -> refused, exit 1, zero mutations
+A3: fractional app_id -> refused, exit 1, zero mutations
+A3: invalid JSON -> refused, exit 1, zero mutations
+A3: missing strict -> refused, exit 1, zero mutations
+A3: non-boolean enforce_admins -> refused, exit 1, zero mutations
+A3: non-boolean pending_settings -> refused, exit 1, zero mutations
+A3: non-string context -> refused, exit 1, zero mutations
+A3: null app_id -> refused, exit 1, zero mutations
+A3: required missing -> refused, exit 1, zero mutations
+A3: string app_id -> refused, exit 1, zero mutations
+A3: advisory_pending present but not an array -> refused, exit 1, zero mutations
+A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations
+A3: context that is only a newline (would empty the list -> protection-only PUT) -> refused, exit 1, zero mutations
+A3: context with an embedded newline (would split into two names in the drift guard) -> refused, exit 1, zero mutations
+A3: whitespace-only context -> refused, exit 1, zero mutations"
+apply_mutant "baseline: strict hardcoded true" \
+  'required_status_checks: { strict: .strict, checks: .required },' 'required_status_checks: { strict: true, checks: .required },' \
+  "A5: PUT takes enforce_admins, strict and app_id from the baseline file"
+apply_mutant "baseline: raw media type not requested" \
+  "-H 'Accept: application/vnd.github.raw' 2>/dev/null" "2>/dev/null" \
+  "#30: full apply sweep ran
+A1: in-sync registry apply PUTs exactly the baseline file checks
+A1: says it read the baseline
+A4: baseline ahead of live -> PENDING
+A4: baseline behind live -> DRIFT
+A5: PUT takes enforce_admins, strict and app_id from the baseline file
+A6: the contents call asks for the raw media type
+B1: every org repo accounted for -> exit 0, no UNREGISTERED
+B5: archived extra repo is ignored, and reported as ignored
+case1: undeclared 5th live check blocks apply and names it
+case2: PUT body carries all 11 declared checks
+case2: registry PUT pins every check to app_id 15368 via checks
+case2: registry PUT sets enforce_admins:true (issue #29)
+case2: registry-rs-insync (post-fix) -> exit 0, reports in sync
+check: prints the live contexts it read, per repo, even when in sync
+G1c: clean full sweep still exits 0, no PENDING marker
+G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear
+G4 regression guard: default no-arg full sweep --check still exits 0
+override: --allow-check-removal lets a drifted apply complete
+override: PUT body reaches the mutation path with the reduced (declared-only) contexts"
+
+apply_mutant "baseline: control characters in a context accepted" \
+  ' and (explode | map(. < 32 or . == 127) | any | not)' '' \
+  'A3: context with an embedded newline (would split into two names in the drift guard) -> refused, exit 1, zero mutations'
+apply_mutant "baseline: app_id -1 / 0 accepted (positive check removed)" \
+  ' and . > 0 and . < 4503599627370496' '' \
+  'A3: app_id -1 (any app: unpins the check) -> refused, exit 1, zero mutations
+A3: app_id 0 -> refused, exit 1, zero mutations
+A3: app_id beyond a safe integer -> refused, exit 1, zero mutations'
 
 
 # --- #22: guards that had zero mutant coverage. Killer sets below were

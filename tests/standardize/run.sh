@@ -321,6 +321,7 @@ assert_zero_mutations "$LOG" "case10: api-failure -> no -X in GH_LOG"
 #     Apply mode must block before any mutation and name the dropped check. ---
 SCRATCH_5TH="$(mktemp -d)"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" "$SCRATCH_5TH/"
+cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_contents_.github_required-checks.json.json" "$SCRATCH_5TH/"
 jq '.protection.required_status_checks.contexts += ["nightly fuzz (spec fixtures)"]
     | .protection.required_status_checks.checks += [{"context":"nightly fuzz (spec fixtures)","app_id":15368}]' \
   "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main.json" \
@@ -520,6 +521,12 @@ write_org_listing() {
   } | jq -R -s -c 'split("\n")|map(select(length>0)|split("\t")|{name:.[0],archived:(.[1]=="true"),fork:false})' > "$fx_dir/orgs_${ORG}_repos.json"
 }
 
+# write_registry_baseline <dir> -- serve acdp-registry-rs's committed
+# .github/required-checks.json (raw) from the canonical fixture.
+write_registry_baseline() {
+  cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_contents_.github_required-checks.json.json" "$1/"
+}
+
 SWEEP_FX="$(mktemp -d)"
 write_insync_fixture "$SWEEP_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
 write_insync_fixture "$SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
@@ -530,6 +537,7 @@ write_insync_fixture "$SWEEP_FX" agentcontextdistributionprotocol "All Validatio
 write_unprotected_fixture "$SWEEP_FX" acdp-ci
 write_unprotected_fixture "$SWEEP_FX" .github
 write_org_listing "$SWEEP_FX"
+write_registry_baseline "$SWEEP_FX"
 # Corrupt repo #1 (first entry in ALL_REPOS) -> unreadable.
 rm -f "$SWEEP_FX/repos_${ORG}_acdp-control-plane_branches_main.json"
 
@@ -574,6 +582,7 @@ write_insync_fixture "$CLEAN_SWEEP_FX" agentcontextdistributionprotocol "All Val
 write_unprotected_fixture "$CLEAN_SWEEP_FX" acdp-ci
 write_unprotected_fixture "$CLEAN_SWEEP_FX" .github
 write_org_listing "$CLEAN_SWEEP_FX"
+write_registry_baseline "$CLEAN_SWEEP_FX"
 LOG="$(new_log)"
 out="$(FIXTURES="$CLEAN_SWEEP_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
 rc=$?
@@ -683,6 +692,7 @@ write_insync_fixture "$CLEAN_SWEEP2_FX" agentcontextdistributionprotocol "All Va
 write_unprotected_fixture "$CLEAN_SWEEP2_FX" acdp-ci
 write_unprotected_fixture "$CLEAN_SWEEP2_FX" .github
 write_org_listing "$CLEAN_SWEEP2_FX"
+write_registry_baseline "$CLEAN_SWEEP2_FX"
 LOG="$(new_log)"
 out="$(FIXTURES="$CLEAN_SWEEP2_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
 rc=$?
@@ -706,6 +716,7 @@ rm -rf "$CLEAN_SWEEP2_FX"
 #     list, so it holds regardless of the exact missing-set size. ---
 SCRATCH_BOTH="$(mktemp -d)"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" "$SCRATCH_BOTH/"
+cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_contents_.github_required-checks.json.json" "$SCRATCH_BOTH/"
 jq '.protection.required_status_checks.contexts = ["rustfmt","clippy","tests","nightly fuzz (spec fixtures)"]
     | .protection.required_status_checks.checks = [
         {"context":"rustfmt","app_id":15368},
@@ -814,6 +825,7 @@ write_insync_fixture "$CLEAN_FX" acdp-ui-console "Lint · Typecheck · Test · B
 write_insync_fixture "$CLEAN_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$CLEAN_FX" acdp-ci
 write_unprotected_fixture "$CLEAN_FX" .github
+write_registry_baseline "$CLEAN_FX"
 LOG="$(new_log)"
 FIXTURES="$CLEAN_FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" >/dev/null 2>&1
 rc=$?
@@ -850,6 +862,7 @@ build_clean_sweep() {
   write_insync_fixture "$d" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
   write_unprotected_fixture "$d" acdp-ci
   write_unprotected_fixture "$d" .github
+  write_registry_baseline "$d"
 }
 
 # B1: clean listing -> exit 0, no marker.
@@ -949,6 +962,113 @@ if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "in both ALL_REPOS and EXCLUD
 else
   fail "B8: managed-and-excluded overlap is a config error (exit 2, before any gh call)" "rc=$rc out=$out"
 fi
+
+echo
+echo "== #33 (#29 item 3): the registry's required checks come from its own baseline file =="
+
+BASE_REL="repos_${ORG}_acdp-registry-rs_contents_.github_required-checks.json.json"
+GOOD_BASE="$FIXTURES_ROOT/registry-rs-insync/$BASE_REL"
+new_registry_fx() {
+  d="$(mktemp -d)"
+  cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" \
+     "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main.json" "$d/"
+  cp "$GOOD_BASE" "$d/$BASE_REL"
+  echo "$d"
+}
+
+# A1: in sync -> apply exit 0; the PUT is built from the file; the raw media type was requested (A6).
+FX="$(new_registry_fx)"; LOG="$(new_log)"
+out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs 2>&1)"; rc=$?
+body="$(put_body_of "$LOG")"
+want_checks="$(jq -c '.required' "$GOOD_BASE")"
+if [ "$rc" -eq 0 ] && [ "$(printf '%s' "$body" | jq -c '.required_status_checks.checks')" = "$want_checks" ] \
+   && [ "$(printf '%s' "$body" | jq -c '[.required_status_checks.strict,.enforce_admins,(.required_status_checks|has("contexts"))]')" = "[true,true,false]" ]; then
+  pass "A1: in-sync registry apply PUTs exactly the baseline file checks (with app_ids), strict and enforce_admins"
+else
+  fail "A1: in-sync registry apply PUTs exactly the baseline file checks" "rc=$rc body=$body out=$out"
+fi
+printf '%s' "$out" | grep -q "baseline read from .github/required-checks.json (11 checks, enforce_admins=true" && pass "A1: says it read the baseline" || fail "A1: says it read the baseline" "$out"
+grep -q "Accept: application/vnd.github.raw" "$LOG" && pass "A6: the contents call asks for the raw media type" || fail "A6: the contents call asks for the raw media type" "$(cat "$LOG")"
+# A6b: dropping that header yields the base64 envelope (stub models the real API) -> validation must fail closed.
+FXA="$(new_registry_fx)"
+envelope="$(FIXTURES="$FXA" GH_LOG="$(new_log)" gh api "repos/$ORG/acdp-registry-rs/contents/.github/required-checks.json" --jq .encoding)"
+[ "$envelope" = "base64" ] && pass "A6b: stub serves a base64 envelope when the raw header is absent (so dropping it is a behavioural failure)" || fail "A6b: stub serves a base64 envelope when the raw header is absent" "got '$envelope'"
+rm -rf "$FXA"
+# A8: bad config around it: unknown top-level keys (_comment, tag_ruleset) are tolerated -- the good fixture has both.
+jq -e 'has("_comment") and has("tag_ruleset")' "$GOOD_BASE" >/dev/null && pass "A8: the canonical fixture carries unknown keys, so A1 proves they are tolerated" || fail "A8: the canonical fixture carries unknown keys" "missing"
+rm -rf "$FX"
+
+# A2: baseline file missing.
+FX="$(new_registry_fx)"; rm -f "$FX/$BASE_REL"
+LOG="$(new_log)"
+out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "cannot read .github/required-checks.json"; } && pass "A2: missing baseline -> apply exits 1" || fail "A2: missing baseline -> apply exits 1" "rc=$rc out=$out"
+assert_zero_mutations "$LOG" "A2: missing baseline -> apply makes zero mutating calls"
+out="$(FIXTURES="$FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check acdp-registry-rs 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && pass "A2: --check on the registry alone with no baseline -> exit 2 (the only surveyed repo is unreadable)" || fail "A2: --check on the registry alone with no baseline -> exit 2" "rc=$rc out=$out"
+SW="$(mktemp -d)"; build_clean_sweep "$SW"; write_org_listing "$SW"; rm -f "$SW/$BASE_REL"
+out="$(FIXTURES="$SW" GH_LOG="$(new_log)" "$STANDARDIZE" --check 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "acdp-registry-rs: cannot read .github/required-checks.json"; } && pass "A2: sweep with the baseline missing -> exit 1 naming the registry" || fail "A2: sweep with the baseline missing -> exit 1 naming the registry" "rc=$rc out=$out"
+rm -rf "$SW" "$FX"
+
+# A3: malformed baselines all fail closed with zero mutations.
+check_bad_baseline() {
+  label="$1"; content="$2"
+  FX="$(new_registry_fx)"; printf '%s' "$content" > "$FX/$BASE_REL"
+  LOG="$(new_log)"
+  out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs 2>&1)"; rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "not a valid baseline" && [ "$(count_mutations "$LOG")" -eq 0 ]; then
+    pass "A3: $label -> refused, exit 1, zero mutations"
+  else
+    fail "A3: $label -> refused, exit 1, zero mutations" "rc=$rc mutations=$(count_mutations "$LOG") out=$out"
+  fi
+  rm -rf "$FX"
+}
+check_bad_baseline "invalid JSON" 'not json {'
+check_bad_baseline "a JSON array, not an object" '[1,2]'
+check_bad_baseline "empty required (would wipe all checks)" "$(jq -c '.required=[]' "$GOOD_BASE")"
+check_bad_baseline "required missing" "$(jq -c 'del(.required)' "$GOOD_BASE")"
+check_bad_baseline "non-string context" "$(jq -c '.required[0].context=5' "$GOOD_BASE")"
+check_bad_baseline "empty-string context" "$(jq -c '.required[0].context=""' "$GOOD_BASE")"
+check_bad_baseline "string app_id" "$(jq -c '.required[0].app_id="15368"' "$GOOD_BASE")"
+check_bad_baseline "null app_id" "$(jq -c '.required[0].app_id=null' "$GOOD_BASE")"
+check_bad_baseline "fractional app_id" "$(jq -c '.required[0].app_id=1.5' "$GOOD_BASE")"
+check_bad_baseline "non-boolean enforce_admins" "$(jq -c '.enforce_admins="yes"' "$GOOD_BASE")"
+check_bad_baseline "missing strict" "$(jq -c 'del(.strict)' "$GOOD_BASE")"
+check_bad_baseline "non-boolean pending_settings" "$(jq -c '.pending_settings=1' "$GOOD_BASE")"
+check_bad_baseline "duplicate contexts" "$(jq -c '.required += [.required[0]]' "$GOOD_BASE")"
+check_bad_baseline "context both required and advisory_pending" "$(jq -c '.advisory_pending=["rustfmt"]' "$GOOD_BASE")"
+check_bad_baseline "advisory_pending not an array of strings" "$(jq -c '.advisory_pending=[1]' "$GOOD_BASE")"
+check_bad_baseline "advisory_pending present but not an array" "$(jq -c '.advisory_pending=false' "$GOOD_BASE")"
+check_bad_baseline "context with an embedded newline (would split into two names in the drift guard)" "$(jq -c '.required[0].context="rustfmt\nclippy"' "$GOOD_BASE")"
+check_bad_baseline "context that is only a newline (would empty the list -> protection-only PUT)" "$(jq -c '.required |= [{"context":"\n","app_id":15368}]' "$GOOD_BASE")"
+check_bad_baseline "whitespace-only context" "$(jq -c '.required[0].context="   "' "$GOOD_BASE")"
+check_bad_baseline "app_id -1 (any app: unpins the check)" "$(jq -c '.required[0].app_id=-1' "$GOOD_BASE")"
+check_bad_baseline "app_id 0" "$(jq -c '.required[0].app_id=0' "$GOOD_BASE")"
+check_bad_baseline "app_id beyond a safe integer" "$(jq -c '.required[0].app_id=4503599627370496' "$GOOD_BASE")"
+
+# A4: file ahead of live -> PENDING; file behind live -> DRIFT and apply is blocked.
+FX="$(new_registry_fx)"
+jq -c '.required += [{"context":"brand-new-check","app_id":15368}]' "$GOOD_BASE" > "$FX/$BASE_REL"
+out="$(FIXTURES="$FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "!! PENDING: acdp-registry-rs: .*brand-new-check"; } && pass "A4: a check added to the baseline but not yet live -> PENDING, exit 1" || fail "A4: baseline ahead of live -> PENDING" "rc=$rc out=$out"
+jq -c '.required |= map(select(.context != "rustdoc"))' "$GOOD_BASE" > "$FX/$BASE_REL"
+out="$(FIXTURES="$FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "!! DRIFT: acdp-registry-rs: .*rustdoc"; } && pass "A4: a live check the baseline dropped -> DRIFT, exit 1" || fail "A4: baseline behind live -> DRIFT" "rc=$rc out=$out"
+LOG="$(new_log)"
+out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ "$(count_mutations "$LOG")" -eq 0 ]; } && pass "A4: apply is blocked by that DRIFT, zero mutations" || fail "A4: apply is blocked by that DRIFT" "rc=$rc"
+rm -rf "$FX"
+
+# A5: the PUT carries the FILE's values, not hardcoded ones.
+FX="$(new_registry_fx)"
+jq -c '.enforce_admins=false | .strict=false | .required |= map(.app_id=99)' "$GOOD_BASE" > "$FX/$BASE_REL"
+LOG="$(new_log)"
+FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs >/dev/null 2>&1
+body="$(put_body_of "$LOG")"
+got="$(printf '%s' "$body" | jq -c '[.enforce_admins,.required_status_checks.strict,([.required_status_checks.checks[].app_id]|unique)]')"
+[ "$got" = "[false,false,[99]]" ] && pass "A5: PUT takes enforce_admins, strict and app_id from the baseline file" || fail "A5: PUT takes enforce_admins, strict and app_id from the baseline file" "got '$got'"
+rm -rf "$FX"
 
 echo
 echo "===================="
