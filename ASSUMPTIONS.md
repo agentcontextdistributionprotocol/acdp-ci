@@ -123,3 +123,11 @@
 - **Alternatives:** exposing attempts/sleep as workflow inputs; auto-detecting node version from consumer; exact-version equality.
 - **Blast radius if wrong:** a slow publish makes the bump job fail (re-run fixes it); no bad PR is ever opened.
 - **Status:** UNCONFIRMED
+
+## auto-merge deny lists
+- **Plan:** plans/open-issues-sweep.md
+- **Assumed:** a name/group deny list (not a lockfile-diff `gate-script` input) is enough for the shared workflow; acdp-rs keeps its own gate.
+- **Chose:** `actions/auto-merge-gate` composite (decide.sh/disarm.sh), fail-safe hold only for `exclude-dependencies`; disarm only on deny holds; per-PR concurrency group; no disarm if the gate step itself fails (G4, accepted).
+- **Alternatives:** a `gate-script` input loaded from the base SHA (deferred until a repo needs acdp-rs-style lockfile gating); `!cancelled()` disarm.
+- **Blast radius if wrong:** an unevaluable group list arms (documented asymmetry); a stale arm can survive a gate-step failure.
+- **Status:** UNCONFIRMED

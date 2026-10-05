@@ -52,7 +52,10 @@ patch/minor — e.g. for crypto-critical dependencies:
       exclude-groups: crypto
 ```
 
-Empty (the default) is exactly the policy above. Fail-safe: if a dependency deny
+Empty (the default) is exactly the policy above. A deny-list hold also **disarms**
+auto-merge if it was already armed — including one a human armed by hand — whenever
+Dependabot pushes or rebases the PR; a held *major* is never disarmed. `[`/`!(…)`
+extglob syntax in a pattern is honoured by bash (`!(x)` holds nearly everything). Fail-safe: if a dependency deny
 list is set but the PR's dependency names can't be determined, the PR is held. A
 name list only sees the dependencies Dependabot set out to update, **not
 transitive lockfile movement**; a repo that needs a lockfile-diff gate keeps its
