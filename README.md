@@ -8,7 +8,7 @@ repo stays uniform instead of drifting.
 
 | Reusable workflow | Purpose |
 |---|---|
-| [`.github/workflows/auto-merge.yml`](.github/workflows/auto-merge.yml) | Auto-merge Dependabot PRs once required checks pass. Patch + minor unattended; **majors held** for review. |
+| [`.github/workflows/auto-merge.yml`](.github/workflows/auto-merge.yml) | Auto-merge Dependabot PRs once required checks pass. Patch + minor unattended; **majors held** for review. Optional `exclude-dependencies` / `exclude-groups` globs hold matching PRs (and disarm a stale arm). |
 | [`.github/workflows/bump-consume.yml`](.github/workflows/bump-consume.yml) | Consume a new `acdp` SDK release: resolve → wait for registry → bump manifest + lockfile (npm: wait for all platform packages, relock, verify `npm ci --dry-run`, fail closed) → PR → arm auto-merge. Ecosystems: `npm`, `cargo`, `uv`. |
 | [`.github/workflows/bump-spec-ref.yml`](.github/workflows/bump-spec-ref.yml) | Adopt a new pinned ACDP spec SHA: rewrite the pinned `ref:` in a target workflow file → PR. **Held, never auto-merged** — the PR's own conformance CI runs against the new fixtures, and a human adopts the new spec deliberately. |
 
@@ -40,6 +40,30 @@ jobs:
   call:
     uses: agentcontextdistributionprotocol/acdp-ci/.github/workflows/auto-merge.yml@v1
 ```
+
+Optional deny lists (globs; newline- or comma-separated) hold a PR even when it is
+patch/minor — e.g. for crypto-critical dependencies:
+
+```yaml
+    with:
+      exclude-dependencies: |
+        ring
+        @noble/*
+      exclude-groups: crypto
+```
+
+Empty (the default) is exactly the policy above. A deny-list hold also **disarms**
+auto-merge if it was already armed — including one a human armed by hand — whenever
+Dependabot pushes or rebases the PR; a held *major* is never disarmed. `[`/`!(…)`
+extglob syntax in a pattern is honoured by bash (`!(x)` holds nearly everything). Fail-safe: if a dependency deny
+list is set but the PR's dependency names can't be determined, the PR is held. A
+name list only sees the dependencies Dependabot set out to update, **not
+transitive lockfile movement**; a repo that needs a lockfile-diff gate keeps its
+own workflow. `acdp-rs` is that repo: it deliberately does **not** use this
+shared workflow (its own `dependabot-auto-merge.yml` gates on a crypto-critical
+lockfile diff; two workflows arming one PR is the race acdp-rs#351 removed), so
+`standardize.sh` does not manage it and nothing here should re-add the shared
+caller there.
 
 `bump-acdp` (consumers only) — commit `.github/workflows/bump-acdp.yml`:
 

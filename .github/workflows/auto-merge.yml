@@ -5,7 +5,12 @@ name: auto-merge
 # — it does NOT bypass CI. Policy: patch + minor merge unattended; a major bump
 # opens the PR but waits for a human (a green build is not sufficient signal to
 # ship a breaking change in a protocol/crypto stack). A caller may set
-# allow-major: true to opt out of the hold.
+# allow-major: true to opt out of the hold. Optional deny lists hold a PR even
+# when it is patch/minor: `exclude-dependencies` (globs on updated dependency
+# names) and `exclude-groups` (globs on the Dependabot group). Both empty =
+# exactly the policy above. A name list cannot see transitive lockfile
+# movement; a repo that needs a lockfile-diff gate (acdp-rs) keeps its own
+# workflow instead of this one.
 #
 # Convention: third-party actions are SHA-pinned (matching acdp-rs); first-party
 # actions/* are trusted by major tag.
@@ -25,11 +30,26 @@ on:
         required: false
         type: boolean
         default: false
+      exclude-dependencies:
+        description: 'Newline/comma separated globs; a PR updating a matching dependency is held (and a stale arm is disarmed)'
+        required: false
+        type: string
+        default: ''
+      exclude-groups:
+        description: 'Newline/comma separated globs; a PR in a matching Dependabot group is held (and a stale arm is disarmed)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
     if: ${{ github.actor == 'dependabot[bot]' }}
+    # One run per PR at a time: an older run must not arm after a newer run
+    # (e.g. after a rebase) decided to hold and disarmed.
+    concurrency:
+      group: auto-merge-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: write
       pull-requests: write
@@ -38,8 +58,22 @@ jobs:
         id: meta
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
+      - name: Gate — policy + deny lists
+        id: gate
+        uses: agentcontextdistributionprotocol/acdp-ci/actions/auto-merge-gate@v1
+        with:
+          update-type: ${{ steps.meta.outputs.update-type }}
+          dependency-group: ${{ steps.meta.outputs.dependency-group }}
+          updated-dependencies-json: ${{ steps.meta.outputs.updated-dependencies-json }}
+          dependency-names: ${{ steps.meta.outputs.dependency-names }}
+          allow-major: ${{ inputs.allow-major }}
+          exclude-dependencies: ${{ inputs.exclude-dependencies }}
+          exclude-groups: ${{ inputs.exclude-groups }}
+          pr-url: ${{ github.event.pull_request.html_url }}
+          github-token: ${{ github.token }}
+
       - name: Guard — base branch must require status checks
-        if: ${{ inputs.allow-major || steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor' }}
+        if: ${{ steps.gate.outputs.eligible == 'true' }}
         run: |
           branch="$(gh api "repos/${{ github.repository }}/branches/$BASE_REF")"
           protected="$(echo "$branch" | jq -r '.protected')"
@@ -52,8 +86,8 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           GH_TOKEN: ${{ github.token }}
 
-      - name: Enable auto-merge (patch & minor; majors held)
-        if: ${{ inputs.allow-major || steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor' }}
+      - name: Enable auto-merge (patch & minor; majors and deny-listed held)
+        if: ${{ steps.gate.outputs.eligible == 'true' }}
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}

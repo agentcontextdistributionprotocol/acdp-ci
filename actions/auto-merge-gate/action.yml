@@ -1,0 +1,72 @@
+name: auto-merge-gate
+description: >-
+  Decide whether the shared auto-merge workflow may arm auto-merge on a
+  Dependabot PR (patch/minor by default, plus optional dependency/group deny
+  lists), and disarm a stale arm when a deny list holds the PR. See decide.sh.
+
+inputs:
+  update-type:
+    description: 'dependabot/fetch-metadata update-type output.'
+    required: true
+  dependency-group:
+    description: 'fetch-metadata dependency-group output (may be empty).'
+    required: false
+    default: ''
+  updated-dependencies-json:
+    description: 'fetch-metadata updated-dependencies-json output.'
+    required: false
+    default: ''
+  dependency-names:
+    description: 'fetch-metadata dependency-names output (comma separated) — fallback.'
+    required: false
+    default: ''
+  allow-major:
+    description: 'Arm even on a major bump.'
+    required: false
+    default: 'false'
+  exclude-dependencies:
+    description: 'Newline/comma separated globs; a PR updating a matching dependency is held.'
+    required: false
+    default: ''
+  exclude-groups:
+    description: 'Newline/comma separated globs; a PR in a matching Dependabot group is held.'
+    required: false
+    default: ''
+  pr-url:
+    description: 'PR html_url (for the disarm step).'
+    required: true
+  github-token:
+    description: 'Token for gh (pull-requests: write).'
+    required: true
+
+outputs:
+  eligible:
+    description: "'true' if auto-merge may be armed."
+    value: ${{ steps.decide.outputs.eligible }}
+  reason:
+    description: 'Why (for the job log).'
+    value: ${{ steps.decide.outputs.reason }}
+
+runs:
+  using: composite
+  steps:
+    - name: Decide
+      id: decide
+      shell: bash
+      env:
+        UPDATE_TYPE: ${{ inputs.update-type }}
+        GROUP: ${{ inputs.dependency-group }}
+        DEPS_JSON: ${{ inputs.updated-dependencies-json }}
+        DEP_NAMES: ${{ inputs.dependency-names }}
+        ALLOW_MAJOR: ${{ inputs.allow-major }}
+        EXCLUDE_DEPENDENCIES: ${{ inputs.exclude-dependencies }}
+        EXCLUDE_GROUPS: ${{ inputs.exclude-groups }}
+      run: ${{ github.action_path }}/decide.sh
+
+    - name: Disarm a stale arm (deny-list holds only)
+      if: ${{ steps.decide.outputs.eligible != 'true' && steps.decide.outputs.held_by_deny == 'true' }}
+      shell: bash
+      env:
+        PR_URL: ${{ inputs.pr-url }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: ${{ github.action_path }}/disarm.sh

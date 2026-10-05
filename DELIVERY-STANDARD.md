@@ -579,7 +579,7 @@ git ls-remote --tags origin   # the ^{} line for refs/tags/v1 must now show $NEW
 gh api repos/agentcontextdistributionprotocol/acdp-ci/git/ref/tags/v1 -q '.object.sha'
 # ^ returns the new TAG-OBJECT sha, which differs from $NEW_SHA — expected for an annotated
 #   tag. Always compare the peeled ^{} line, or you will wrongly conclude the push failed.
-# Smoke: re-run one consumer workflow (e.g. acdp-rs auto-merge or a bump dispatch) and confirm
+# Smoke: re-run one consumer workflow (e.g. a consumer's `auto-merge` caller or a bump dispatch — acdp-rs no longer calls the shared `auto-merge.yml`) and confirm
 # it resolves @v1 and passes.
 
 # 6. Rollback — restores the exact original tag object (tagger/date/message included).
@@ -665,7 +665,7 @@ automatic, audit-logged bypass; rollback is one DELETE.
 
 | Repo | Lang | CI caller | auto-merge | Dependabot | bump-acdp | Publish | Graph role |
 |---|---|---|---|---|---|---|---|
-| acdp-rs | Rust | own ci | ✅ | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / all four lanes dispatch — see propagation graph** |
+| acdp-rs | Rust | own ci | own gate (`dependabot-auto-merge.yml`, crypto lockfile gate — not the shared `auto-merge.yml`; acdp-rs#351) | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / all four lanes dispatch — see propagation graph** |
 | acdp-registry-rs | Rust | own ci | ✅ | cargo+ga | cargo | Docker + crate | consumes crate |
 | acdp-control-plane | npm | own ci | ✅ | npm+docker+ga | npm | Docker | consumes npm |
 | acdp-playground | Python/uv | own ci | ✅ | uv+ga | uv | Docker | consumes py |
