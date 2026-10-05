@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Shadow `gh` for tests/auto-merge/run.sh: models `gh pr view --json
+# autoMergeRequest --jq ...` and `gh pr merge --disable-auto`. State: $FAKE_ARMED=1|0.
+echo "gh $*" >> "${GH_LOG:?}"
+case "$1 $2" in
+  "pr view") [ "${FAKE_ARMED:-0}" = 1 ] && echo true || echo false ;;
+  "pr merge") exit 0 ;;
+  *) echo "fake gh: unsupported: $*" >&2; exit 98 ;;
+esac
