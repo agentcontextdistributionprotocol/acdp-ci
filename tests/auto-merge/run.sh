@@ -47,6 +47,7 @@ decide "deny list + major still held, but NOT a deny hold" false false UPDATE_TY
 decide "a name containing glob chars is matched literally on the left" true false UPDATE_TYPE=$PATCH 'DEPS_JSON=[{"dependencyName":"a*b"}]' EXCLUDE_DEPENDENCIES=zzz
 
 decide "CR-only line endings (no comment to hide the CR)" false true UPDATE_TYPE=$PATCH "DEPS_JSON=$DEPS_RING" "EXCLUDE_DEPENDENCIES=$(printf 'ring\r\n')"
+decide "bare CR separates names (ring<CR>tokio holds ring)" false true UPDATE_TYPE=$PATCH "DEPS_JSON=$DEPS_RING" "EXCLUDE_DEPENDENCIES=$(printf 'tokio\rring')"
 decide "dependency-names fallback, no match -> arm"  true false UPDATE_TYPE=$PATCH DEPS_JSON= "DEP_NAMES=serde, tokio" EXCLUDE_DEPENDENCIES=ring
 
 echo "== exclude-groups =="
@@ -72,8 +73,8 @@ n="$(grep -c "steps.gate.outputs.eligible == 'true'" "$WF")"
 grep -q "update-type == 'version-update:semver" "$WF" && fail "wiring: the old inline type condition is gone from the steps" "still present" || pass "wiring: the old inline type condition is gone from the steps"
 
 ACT="$HERE/../../actions/auto-merge-gate/action.yml"
-grep -q "steps.decide.outputs.held_by_deny == 'true'" "$ACT" && pass "wiring: the disarm step only runs for deny-list holds (never a held major)" || fail "wiring: the disarm step only runs for deny-list holds" "condition missing"
-grep -q "^concurrency:\|^    concurrency:" "$WF" && pass "wiring: runs for one PR are serialized (no arm/disarm interleaving)" || fail "wiring: runs for one PR are serialized" "no concurrency group"
+grep -Eq "^ +if: .*steps\.decide\.outputs\.eligible != 'true' && steps\.decide\.outputs\.held_by_deny == 'true' \}\}$" "$ACT" && pass "wiring: the disarm step only runs for deny-list holds (never a held major)" || fail "wiring: the disarm step only runs for deny-list holds" "condition missing"
+grep -Eq "group: .*pull_request\.number" "$WF" && pass "wiring: runs for one PR are serialized (no arm/disarm interleaving)" || fail "wiring: runs for one PR are serialized" "no concurrency group"
 
 echo; echo "===================="; echo "  $PASS passed, $FAIL failed"; echo "===================="
 [ "$FAIL" -eq 0 ]

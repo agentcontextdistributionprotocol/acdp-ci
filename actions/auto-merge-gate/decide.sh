@@ -40,9 +40,9 @@ emit() {
 }
 
 # Newline/comma separated list -> one pattern per line; trims, drops blanks and
-# `# comments`, strips CR.
+# `# comments`; CR (CRLF or bare) is a line break.
 patterns() {
-  printf '%s\n' "$1" | tr ',\r' '\n ' | sed -e 's/#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed '/^$/d'
+  printf '%s\n' "$1" | tr ',\r' '\n\n' | sed -e 's/#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed '/^$/d'
 }
 
 # 1. The historical type rule.
