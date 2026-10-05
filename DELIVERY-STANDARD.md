@@ -205,7 +205,14 @@ not repeated here.
 2. The consumer's thin `bump-acdp.yml` calls `bump-consume.yml@v1`, which:
    resolves the target, **waits for the registry to actually serve it** (npm CDN
    / crates.io index / PyPI can lag a publish), bumps the manifest + lockfile for
-   the ecosystem (`npm` rewrites the dep and any `npm:` alias; `cargo` edits the
+   the ecosystem (`npm` rewrites the dep and any `npm:` alias, then runs the
+   `actions/npm-relock` composite action: it waits for **every** optional
+   platform package of the target, relocks, and verifies the lock contains them
+   and passes `npm ci --dry-run` — a release publishes the main package before
+   its platform packages, and an un-verified relock in that window silently
+   drops them (acdp-ci#28), so a bad lock now fails the bump job instead of
+   opening a red PR; the `node-version` input (default `22`) should match the
+   consumer's CI; `cargo` edits the
    version in place preserving `features`, virtual-workspace-safe, then
    `cargo update --precise`; `uv` runs `uv lock --upgrade-package`), opens a PR,
    and arms auto-merge **unless the bump is breaking** (major, or a `0.x` minor).
