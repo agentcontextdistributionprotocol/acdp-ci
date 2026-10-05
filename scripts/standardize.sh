@@ -150,6 +150,16 @@
 # guard to compare the full protection object (not just contexts) is a
 # named wave-6 item, not attempted in this change.
 #
+# The repo list itself is checked too (acdp-ci#19): in the default --check
+# sweep only (never when repos are named, never in apply), the org's repos are
+# enumerated and any non-archived one that is in neither ALL_REPOS nor
+# EXCLUDED_REPOS (each exclusion carries a reason, see excluded_reason()) is
+# reported as `!! UNREGISTERED:` and makes --check exit 1. An unreadable or
+# empty listing, or an accounted-for repo missing from it, is an ERRORS finding
+# rather than a clean pass. Blind spot: if the App installation is ever
+# narrowed to "selected repositories", an uninstalled new repo is invisible
+# here; it is only noticed when an accounted-for repo drops out of the listing.
+#
 # Prereqs: gh auth with admin:org for apply; contents:read is enough to run
 #          --check. Org secrets (App id/key) are set separately.
 # Usage: ./standardize.sh [--check|--dry-run] [--allow-check-removal] [repo ...]
@@ -163,6 +173,29 @@ ORG=agentcontextdistributionprotocol
 # leading dot is not one (no unquoted glob expands it), but this is a property of
 # the specific names, not something the script enforces.
 ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol acdp-ci .github"
+
+# Org repos that are DELIBERATELY not managed here, each with a reason. This is
+# what makes the UNREGISTERED check (acdp-ci#19) mean something: a repo absent
+# from ALL_REPOS is either listed here with a reason, or it is reported. If the
+# exclusions were merely "whatever is not in ALL_REPOS" the check would compare
+# a list against itself.
+EXCLUDED_REPOS="acdp-rs acdp-website"
+excluded_reason() {
+  case "$1" in
+    acdp-rs) echo "self-governed: its own required checks and crypto-critical Dependabot gate (acdp-rs#351); a contexts-only PUT from here would replace them wholesale" ;;
+    acdp-website) echo "private repo on a free plan: branch protection and rulesets both 403" ;;
+    *) return 1 ;;
+  esac
+}
+# Config self-check: an excluded repo that is also managed would make the
+# check contradict itself, and an exclusion without a reason is not an
+# exclusion. A config error is exit 2 (not a result), like a bad flag.
+for _x in $EXCLUDED_REPOS; do
+  case " $ALL_REPOS " in
+    *" $_x "*) echo "standardize.sh: config error: '$_x' is in both ALL_REPOS and EXCLUDED_REPOS" >&2; exit 2 ;;
+  esac
+  excluded_reason "$_x" >/dev/null || { echo "standardize.sh: config error: EXCLUDED_REPOS entry '$_x' has no excluded_reason()" >&2; exit 2; }
+done
 
 usage() {
   cat <<'EOF'
@@ -183,7 +216,9 @@ default, no --check) needs gh auth with admin:org.
 Exit codes (a contract -- .github/workflows/drift-check.yml routes on these):
   0  --check only: surveyed everything, nothing drifted, nothing pending.
   1  A RESULT. The survey ran and found something worth reporting: drift,
-     a pending declared check, or some (but not all) repos unreadable.
+     a pending declared check, an UNREGISTERED org repo (neither managed nor
+     deliberately excluded; full sweep only), or some (but not all) repos
+     unreadable.
      drift-check.yml files/updates a tracking issue and leaves the job green.
   2  NOT a result. The check could not run or learned nothing: bad flags, an
      explicitly-named unmanaged repo, a missing dependency, or every surveyed
@@ -395,6 +430,7 @@ done
 DRIFT=0
 ERRORS=0
 PENDING=0
+UNREGISTERED=0
 # ERRORS is a flag, so one unreadable repo and every repo unreadable look
 # identical in the summary. Count them: total unreadable == total surveyed
 # means the survey as a whole failed (a degraded token, a network blackhole),
@@ -589,7 +625,39 @@ if [ "$CHECK_MODE" -eq 1 ]; then
     echo "--check: FATAL: all $SURVEYED surveyed repo(s) were unreadable -- this is a broken run, not a drift result (check gh auth and the token's contents:read grant); see '!!' lines above." >&2
     exit 2
   fi
-  if [ "$DRIFT" -ne 0 ] || [ "$ERRORS" -ne 0 ] || [ "$PENDING" -ne 0 ]; then
+  # The org-level registry check (acdp-ci#19). Only for the default full sweep:
+  # naming repos on the command line is a targeted check, not a claim about the
+  # whole org. Never in apply mode (that is the branch above). Runs AFTER the
+  # all-unreadable fatal check so a dead token is still exit 2, not a finding.
+  if [ "$EXPLICIT_REPOS" -eq 0 ]; then
+    if ! listing=$(gh api --paginate "orgs/$ORG/repos" --jq '.[] | [.name, .archived, .fork] | @tsv' 2>/dev/null) || [ -z "$listing" ]; then
+      echo "!! cannot enumerate org repos (orgs/$ORG/repos) -- UNREGISTERED check did not run"
+      ERRORS=1
+    else
+      org_names=$(printf '%s\n' "$listing" | cut -f1)
+      # Every repo we account for must exist in the listing; otherwise the
+      # listing is truncated (token scope shrank), a repo was renamed, or an
+      # exclusion went stale -- and "nothing unregistered" would be a guess.
+      for acct in $ALL_REPOS $EXCLUDED_REPOS; do
+        if ! printf '%s\n' "$org_names" | grep -qxF -- "$acct"; then
+          echo "!! org listing does not contain accounted-for repo '$acct' (renamed/deleted/stale exclusion, or the listing is incomplete) -- UNREGISTERED check is not trustworthy"
+          ERRORS=1
+        fi
+      done
+      while IFS=$'\t' read -r name archived fork; do
+        [ -z "$name" ] && continue
+        case " $ALL_REPOS $EXCLUDED_REPOS " in *" $name "*) continue ;; esac
+        if [ "$archived" = "true" ]; then
+          echo "   ignoring archived org repo: $name"
+          continue
+        fi
+        echo "!! UNREGISTERED: $name is in the org but neither managed (ALL_REPOS) nor deliberately excluded (EXCLUDED_REPOS, with a reason) -- add it to one of them"
+        UNREGISTERED=1
+      done <<<"$listing"
+    fi
+  fi
+
+  if [ "$DRIFT" -ne 0 ] || [ "$ERRORS" -ne 0 ] || [ "$PENDING" -ne 0 ] || [ "$UNREGISTERED" -ne 0 ]; then
     # Three independent conditions, tracked separately -- report exactly
     # which fired instead of a single blended "drift and/or errors" line
     # that would blur a pending-apply into a drift report (or vice versa).
@@ -602,6 +670,9 @@ if [ "$CHECK_MODE" -eq 1 ]; then
     fi
     if [ "$PENDING" -ne 0 ]; then
       found="${found}declared-but-not-yet-live check(s) pending an apply; "
+    fi
+    if [ "$UNREGISTERED" -ne 0 ]; then
+      found="${found}unregistered org repo(s); "
     fi
     echo "--check: found: ${found}see '!!' lines above."
     exit 1

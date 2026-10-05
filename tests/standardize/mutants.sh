@@ -161,7 +161,9 @@ apply_mutant "partial failure over-escalated to fatal (any unreadable, not all)"
 #    collapsed into "managed, protection-only" (return 0 + empty) -- which
 #    would PUT required_status_checks:null onto a repo this script does not own.
 apply_mutant "checks_for tri-state: unmanaged collapsed into protection-only" \
-  '    *) return 1 ;;' '    *) return 0 ;;' \
+  '      return 0 ;;
+    *) return 1 ;;' '      return 0 ;;
+    *) return 0 ;;' \
   "G4: --check -- <typo'd repo> exits non-zero instead of a false all-clear
 G4: --check -- <typo'd repo> makes zero gh calls at all
 G4: --check <typo'd repo> exits non-zero instead of a false all-clear
@@ -195,7 +197,8 @@ apply_mutant "G4: EXPLICIT_REPOS tracking lost after the -- terminator" \
   '    EXPLICIT_REPOS=1
     continue' '    :
     continue' \
-  "G4: --check -- <typo'd repo> exits non-zero instead of a false all-clear"
+  "G4: --check -- <managed repo> works normally
+G4: --check -- <typo'd repo> makes zero gh calls at all"
 
 # 8. enforce_admins differs between the protection-only and has-checks bodies.
 apply_mutant "protection-only body: enforce_admins true -> false" \
@@ -222,6 +225,49 @@ apply_mutant "registry required checks no longer pinned to an app_id" \
   "case2: PUT body carries all 11 declared checks
 case2: registry PUT pins every check to app_id 15368 via checks
 override: PUT body reaches the mutation path with the reduced (declared-only) contexts"
+
+
+# --- #19: the UNREGISTERED org-registry condition. Killer sets measured.
+apply_mutant "UNREGISTERED: repo found but flag never accumulated" \
+  '        UNREGISTERED=1
+      done' '        :
+      done' \
+  "B2: summary names the unregistered condition
+B2: unregistered repo -> exit 1, named, no DRIFT"
+apply_mutant "UNREGISTERED: exclusion subtraction removed (excluded repos reported)" \
+  'case " $ALL_REPOS $EXCLUDED_REPOS " in *" $name "*) continue ;; esac' 'case " $ALL_REPOS " in *" $name "*) continue ;; esac' \
+  "B1: every org repo accounted for -> exit 0, no UNREGISTERED
+B5: archived extra repo is ignored, and reported as ignored
+G1c: clean full sweep still exits 0, no PENDING marker
+G4 regression guard: default no-arg full sweep --check still exits 0"
+apply_mutant "UNREGISTERED: unreadable org listing no longer an error (fail-open)" \
+  '      ERRORS=1
+    else
+      org_names=' '      :
+    else
+      org_names=' \
+  "B3: unreadable org listing -> exit 1 and says the check did not run
+B4a: empty listing -> exit 1, not a clean pass"
+apply_mutant "UNREGISTERED: escalated to fatal exit 2" \
+  '        UNREGISTERED=1
+      done' '        UNREGISTERED=1; exit 2
+      done' \
+  "B2: summary names the unregistered condition
+B2: unregistered repo -> exit 1, named, no DRIFT"
+apply_mutant "UNREGISTERED: org enumerated even when repos are named" \
+  '  if [ "$EXPLICIT_REPOS" -eq 0 ]; then
+    if ! listing=' '  if true; then
+    if ! listing=' \
+  "B6: --check <repo> makes no org enumeration call
+check: prints the live contexts it read, per repo, even when in sync
+flags: trailing --check is parsed as a flag, not a repo name
+G4: --check -- <managed repo> works normally
+G4: --check -- <typo'd repo> makes zero gh calls at all
+G4: --check <typo'd repo> makes zero gh calls at all"
+apply_mutant "UNREGISTERED: accounted-for-repo sanity check removed" \
+  'if ! printf '"'"'%s\n'"'"' "$org_names" | grep -qxF -- "$acct"; then' 'if false; then' \
+  "B4b: listing missing a managed repo -> exit 1, names it
+B9: stale exclusion -> exit 1, names it"
 
 echo
 echo "===================="

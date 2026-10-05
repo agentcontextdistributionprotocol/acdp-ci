@@ -162,8 +162,8 @@ assertions would *notice* if `standardize.sh` stopped behaving correctly. A
 test that passes with the bug injected is worth nothing, and from the outside
 it is indistinguishable from one that works — green either way.
 
-`./tests/standardize/mutants.sh` injects fourteen known bugs and requires the
-suite to fail on each (killer sets for the last ten were *measured*, not guessed):
+`./tests/standardize/mutants.sh` injects twenty known bugs and requires the
+suite to fail on each (killer sets for the last sixteen were *measured*, not guessed):
 
 | mutant | assertions that catch it |
 |---|---|
@@ -181,6 +181,12 @@ suite to fail on each (killer sets for the last ten were *measured*, not guessed
 | registry `enforce_admins` true → false | 1 |
 | protection PUT attempted before the settings PATCH | 3 |
 | registry checks no longer pinned to an `app_id` | 3 |
+| UNREGISTERED: flag never accumulated | 2 |
+| UNREGISTERED: exclusion subtraction removed | 4 |
+| UNREGISTERED: unreadable listing no longer an error (fail-open) | 2 |
+| UNREGISTERED: escalated to fatal exit 2 | 2 |
+| UNREGISTERED: org enumerated even when repos are named | 6 |
+| UNREGISTERED: accounted-for-repo sanity check removed | 2 |
 
 **Honest coverage:** 28 distinct assertions of 94 are mutation-measured
 (acdp-ci#22 asked for the guards with zero coverage, not one mutant per
