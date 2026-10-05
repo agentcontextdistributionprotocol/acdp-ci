@@ -162,8 +162,8 @@ assertions would *notice* if `standardize.sh` stopped behaving correctly. A
 test that passes with the bug injected is worth nothing, and from the outside
 it is indistinguishable from one that works — green either way.
 
-`./tests/standardize/mutants.sh` injects twenty known bugs and requires the
-suite to fail on each (killer sets for the last sixteen were *measured*, not guessed):
+`./tests/standardize/mutants.sh` injects twenty-seven known bugs and requires the
+suite to fail on each (killer sets for all but the original four were *measured*, not guessed):
 
 | mutant | assertions that catch it |
 |---|---|
@@ -187,8 +187,19 @@ suite to fail on each (killer sets for the last sixteen were *measured*, not gue
 | UNREGISTERED: escalated to fatal exit 2 | 2 |
 | UNREGISTERED: org enumerated even when repos are named | 6 |
 | UNREGISTERED: accounted-for-repo sanity check removed | 2 |
+| baseline: empty `required` accepted | 1 |
+| baseline: status 3 (remote baseline) treated as protection-only | 36 |
+| baseline: `app_id` null accepted | 3 |
+| baseline: unreadable baseline not an error in `--check` | 1 |
+| baseline: apply carries on silently when the baseline is unreadable | 16 |
+| baseline: `strict` hardcoded true | 1 |
+| baseline: raw media type not requested | 20 |
 
-**Honest coverage:** 43 distinct assertions of 108 are mutation-measured
+(The 36-killer row is deliberately broad: if status 3 were ever read as 0 the
+empty list would mean "protection-only" and `required_status_checks:null` would
+wipe every registry check. It is a hazard guard, not a precision mutant.)
+
+**Honest coverage:** 57 distinct assertions of 136 are mutation-measured
 (acdp-ci#22 asked for the guards with zero coverage, not one mutant per
 assertion — all five it listed are now covered; one mutant per guard variant,
 not the plan's two for `enforce_admins`-registry and `app_id`). The rest are unmeasured, not
