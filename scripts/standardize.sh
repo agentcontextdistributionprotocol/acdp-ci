@@ -150,6 +150,16 @@
 # guard to compare the full protection object (not just contexts) is a
 # named wave-6 item, not attempted in this change.
 #
+# acdp-registry-rs's required checks are NOT declared in checks_for(): that repo
+# commits its own baseline (.github/required-checks.json, which its daily
+# protection-drift guard already enforces), and this script reads it via the
+# contents API (checks_for() status 3 -> registry_baseline()). One source of
+# truth: contexts, per-check app_id, strict and enforce_admins all come from
+# that file, and a baseline that is unreadable, malformed, has an empty
+# `required` list or a null/non-integer app_id is refused, never defaulted.
+# Trust note: a merge to that repo's main now decides what an admin-token apply
+# PUTs there; weakening the list shows up as DRIFT, an empty one is rejected.
+#
 # The repo list itself is checked too (acdp-ci#19): in the default --check
 # sweep only (never when repos are named, never in apply), the org's repos are
 # enumerated and any non-archived one that is in neither ALL_REPOS nor
@@ -232,12 +242,17 @@ EOF
 # A repo may legitimately have zero required checks: printing nothing and
 # returning 0 means "protection-only, no required checks" — distinct from
 # returning 1, which means "not in the managed set at all, skip entirely".
+# Returning 3 means "managed, and its required checks live in the repo's own
+# committed baseline" (see registry_baseline()) — the list is NOT printed here.
+# This is a distinct status on purpose: if a caller ever treated 3 as 0, the
+# empty output would read as "protection-only" and PUT required_status_checks
+# :null onto a repo with real checks.
 checks_for() {
   case "$1" in
     acdp-control-plane)
       printf '%s\n' "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)" ;;
-    acdp-registry-rs)
-      printf '%s\n' "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins" ;;
+    acdp-registry-rs)  # remote baseline: its committed .github/required-checks.json
+      return 3 ;;
     acdp-playground)
       printf '%s\n' "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds" ;;
     acdp-verifier-py)
@@ -252,29 +267,48 @@ checks_for() {
   esac
 }
 
-# enforce_admins_for <repo> — echoes true|false for the repo's branch-protection
-# enforce_admins flag. acdp-registry-rs's committed baseline
-# (.github/required-checks.json there) is enforce_admins:true; every other
-# repo with required checks stays false (admins can merge past a red check).
-# Protection-only repos are not routed through here (their body is fixed).
-enforce_admins_for() {
-  case "$1" in
-    acdp-registry-rs) echo true ;;
-    *) echo false ;;
-  esac
-}
-
-# app_id_for <repo> — echoes the GitHub App id every required check is pinned
-# to (15368 = GitHub Actions), or nothing for "don't pin". acdp-registry-rs's
-# baseline pins app_id on every required check and its own daily drift guard
-# compares (context, app_id); a contexts-only PUT would widen them to "any
-# app" and trip that guard. The API takes EITHER contexts OR checks, so a
-# pinned repo is PUT with `checks`.
-app_id_for() {
-  case "$1" in
-    acdp-registry-rs) echo 15368 ;;
-    *) : ;;
-  esac
+# registry_baseline <repo> — for a repo whose required checks live in ITS OWN
+# committed baseline (checks_for() returns 3; today only acdp-registry-rs, whose
+# .github/required-checks.json is already compared daily by its own drift
+# guard), read and validate that file and set the globals the protection PUT
+# is built from:
+#   BASE_CONTEXTS  one required context per line
+#   BASE_BODY      {strict, enforce_admins, pending_settings, required:[{context,app_id}]}
+# Returns non-zero (message on stderr) if the file is unreadable or anything
+# about it is malformed. Never defaults: a baseline that cannot be trusted must
+# not become a protection PUT. In particular an empty `required` would read as
+# "no checks" and `required_status_checks` would be wiped, and an `app_id` of
+# null has no faithful PUT mapping (omitted = "auto-select the newest app",
+# -1 = "any app"), so both are rejected rather than guessed. Unknown top-level
+# keys (`_comment`, `tag_ruleset`, …) are tolerated.
+# Called as `if ! registry_baseline "$repo"; then …`, so -e is OFF for the body.
+registry_baseline() {
+  local repo="$1" raw
+  # The raw media type returns the file itself; without it the contents API
+  # returns a base64 envelope, which fails validation below (fail closed).
+  if ! raw=$(gh api "repos/$ORG/$repo/contents/.github/required-checks.json" -H 'Accept: application/vnd.github.raw' 2>/dev/null); then
+    echo "!! $repo: cannot read .github/required-checks.json (missing file, missing repo, or insufficient scope)" >&2
+    return 1
+  fi
+  if ! BASE_BODY=$(printf '%s' "$raw" | jq -c '
+    def bad(m): error(m);
+    if type != "object" then bad("not a JSON object") else . end
+    | if (.strict | type) != "boolean" then bad("strict must be a boolean") else . end
+    | if (.enforce_admins | type) != "boolean" then bad("enforce_admins must be a boolean") else . end
+    | if (.pending_settings | type) != "boolean" then bad("pending_settings must be a boolean") else . end
+    | if (.required | type) != "array" or (.required | length) == 0 then bad("required must be a non-empty array") else . end
+    | if (.required | map(.context | type == "string" and length > 0) | all | not) then bad("every required context must be a non-empty string") else . end
+    | if (.required | map(.app_id | type == "number" and . == floor) | all | not) then bad("every required app_id must be an integer (null is rejected)") else . end
+    | if ((.required | map(.context) | unique | length) != (.required | length)) then bad("duplicate required contexts") else . end
+    | ((.advisory_pending // []) as $adv
+       | if ($adv | type) != "array" or ($adv | map(type == "string") | all | not) then bad("advisory_pending must be an array of strings") else . end
+       | if ([.required[].context] - ([.required[].context] - $adv) | length) > 0 then bad("a context is both required and advisory_pending") else . end)
+    | {strict, enforce_admins, pending_settings, required: (.required | map({context, app_id}))}
+  ' 2>/dev/null); then
+    echo "!! $repo: .github/required-checks.json is not a valid baseline (unparseable, wrong shape, empty required, or null/non-integer app_id) — refusing to derive protection from it" >&2
+    return 1
+  fi
+  BASE_CONTEXTS=$(printf '%s' "$BASE_BODY" | jq -r '.required[].context')
 }
 
 # default_branch <repo> — echoes the repo's default branch name on stdout;
@@ -440,7 +474,13 @@ SURVEYED=0
 UNREADABLE=0
 
 for repo in $repos; do
-  if ! lines=$(checks_for "$repo"); then
+  cf_rc=0
+  lines=$(checks_for "$repo") || cf_rc=$?
+  if [ "$cf_rc" -ne 0 ] && [ "$cf_rc" -ne 1 ] && [ "$cf_rc" -ne 3 ]; then
+    echo "!! $repo: checks_for() returned unexpected status $cf_rc — internal error" >&2
+    exit 2
+  fi
+  if [ "$cf_rc" -eq 1 ]; then
     echo "!! $repo: not in the standard set (excluded/unknown) — skipping"
     # An explicitly-named repo (not the default ALL_REPOS sweep) that turns
     # out to be unmanaged is almost always a typo -- e.g. `--check
@@ -455,6 +495,26 @@ for repo in $repos; do
     continue
   fi
   SURVEYED=$((SURVEYED + 1))
+
+  # Remote baseline (checks_for() == 3): the repo's own committed file is the
+  # source of truth. Read BEFORE the drift guard / any mutation. In --check an
+  # unreadable or invalid baseline is an unreadable repo (a single-repo run
+  # exits 2, a sweep exits 1 naming it); in apply it aborts with zero mutations.
+  baseline=0
+  if [ "$cf_rc" -eq 3 ]; then
+    baseline=1
+    if ! registry_baseline "$repo"; then
+      if [ "$CHECK_MODE" -eq 1 ]; then
+        ERRORS=1
+        UNREADABLE=$((UNREADABLE + 1))
+        continue
+      else
+        echo "!! $repo: aborting before any mutation" >&2
+        exit 1
+      fi
+    fi
+    lines="$BASE_CONTEXTS"
+  fi
 
   if ! branch=$(default_branch "$repo"); then
     if [ "$CHECK_MODE" -eq 1 ]; then
@@ -482,16 +542,28 @@ for repo in $repos; do
   else
     auto_merge=true
     contexts_json=$(printf '%s' "$lines" | jq -R . | jq -sc .)
-    protection_json=$(jq -nc --argjson ctx "$contexts_json" --argjson ea "$(enforce_admins_for "$repo")" --arg app "$(app_id_for "$repo")" '{
-      required_status_checks: (if $app == ""
-        then { strict: true, contexts: $ctx }
-        else { strict: true, checks: ($ctx | map({context: ., app_id: ($app | tonumber)})) } end),
-      enforce_admins: $ea,
-      required_pull_request_reviews: null,
-      restrictions: null,
-      allow_force_pushes: false,
-      allow_deletions: false
-    }')
+    if [ "$baseline" -eq 1 ]; then
+      # strict, enforce_admins and every check's app_id come from the repo's
+      # own baseline; PUT takes `checks` (pinned) OR `contexts`, not both.
+      echo "   $repo: baseline read from .github/required-checks.json ($(printf '%s' "$BASE_BODY" | jq -r '"\(.required | length) checks, enforce_admins=\(.enforce_admins), pending_settings=\(.pending_settings)"'))"
+      protection_json=$(printf '%s' "$BASE_BODY" | jq -c '{
+        required_status_checks: { strict: .strict, checks: .required },
+        enforce_admins: .enforce_admins,
+        required_pull_request_reviews: null,
+        restrictions: null,
+        allow_force_pushes: false,
+        allow_deletions: false
+      }')
+    else
+      protection_json=$(jq -nc --argjson ctx "$contexts_json" '{
+        required_status_checks: { strict: true, contexts: $ctx },
+        enforce_admins: false,
+        required_pull_request_reviews: null,
+        restrictions: null,
+        allow_force_pushes: false,
+        allow_deletions: false
+      }')
+    fi
   fi
 
   # --- drift guard: must run BEFORE the first mutating call, so --check
