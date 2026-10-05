@@ -507,6 +507,19 @@ write_unprotected_fixture() {
     > "$fx_dir/repos_${ORG}_${fx_repo}_branches_main.json"
 }
 
+# write_org_listing <dir> [name:archived ...] -- the orgs/<org>/repos fixture the
+# default --check sweep reads for the UNREGISTERED condition (acdp-ci#19). Always
+# lists every managed + deliberately-excluded repo; extras are name:archived.
+write_org_listing() {
+  fx_dir="$1"; shift
+  {
+    for n in acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol acdp-ci .github acdp-rs acdp-website; do
+      printf '%s\tfalse\n' "$n"
+    done
+    for e in "$@"; do printf '%s\t%s\n' "${e%%:*}" "${e##*:}"; done
+  } | jq -R -s -c 'split("\n")|map(select(length>0)|split("\t")|{name:.[0],archived:(.[1]=="true"),fork:false})' > "$fx_dir/orgs_${ORG}_repos.json"
+}
+
 SWEEP_FX="$(mktemp -d)"
 write_insync_fixture "$SWEEP_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
 write_insync_fixture "$SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
@@ -516,6 +529,7 @@ write_insync_fixture "$SWEEP_FX" acdp-ui-console "Lint · Typecheck · Test · B
 write_insync_fixture "$SWEEP_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$SWEEP_FX" acdp-ci
 write_unprotected_fixture "$SWEEP_FX" .github
+write_org_listing "$SWEEP_FX"
 # Corrupt repo #1 (first entry in ALL_REPOS) -> unreadable.
 rm -f "$SWEEP_FX/repos_${ORG}_acdp-control-plane_branches_main.json"
 
@@ -559,6 +573,7 @@ write_insync_fixture "$CLEAN_SWEEP_FX" acdp-ui-console "Lint · Typecheck · Tes
 write_insync_fixture "$CLEAN_SWEEP_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$CLEAN_SWEEP_FX" acdp-ci
 write_unprotected_fixture "$CLEAN_SWEEP_FX" .github
+write_org_listing "$CLEAN_SWEEP_FX"
 LOG="$(new_log)"
 out="$(FIXTURES="$CLEAN_SWEEP_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
 rc=$?
@@ -667,6 +682,7 @@ write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-ui-console "Lint · Typecheck · Te
 write_insync_fixture "$CLEAN_SWEEP2_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$CLEAN_SWEEP2_FX" acdp-ci
 write_unprotected_fixture "$CLEAN_SWEEP2_FX" .github
+write_org_listing "$CLEAN_SWEEP2_FX"
 LOG="$(new_log)"
 out="$(FIXTURES="$CLEAN_SWEEP2_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
 rc=$?
@@ -748,6 +764,191 @@ else
   fail "fatal: missing jq -> exit 2 and names the missing tool" "rc=$rc out=$out"
 fi
 rm -rf "$NOJQ_BIN"
+
+echo
+echo "== #22 / #30: stub honesty, enforce_admins bodies, acdp-rs never touched =="
+
+# --- the stub must LOG a call even when $FIXTURES is unset, or every "zero gh
+#     calls at all" assertion run without FIXTURES is vacuous. ---
+LOG="$(new_log)"
+( unset FIXTURES; GH_LOG="$LOG" gh api repos/x/y >/dev/null 2>&1 )
+if [ -s "$LOG" ] && grep -q "gh api repos/x/y" "$LOG"; then
+  pass "stub: a call made with FIXTURES unset is still logged (zero-call assertions can fail)"
+else
+  fail "stub: a call made with FIXTURES unset is still logged" "GH_LOG empty: $(cat "$LOG")"
+fi
+
+put_body_of() { awk '/^gh api -X PUT/{getline; if ($0 ~ /^STDIN: /) { sub(/^STDIN: /, ""); print; exit }}' "$1"; }
+
+# --- EA1: the protection-only body asserts enforce_admins:true and no checks.
+FX="$FIXTURES_ROOT/unprotected"
+LOG="$(new_log)"
+FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-ci >/dev/null 2>&1
+ea1="$(put_body_of "$LOG" | jq -c '[.enforce_admins,.required_status_checks]' 2>/dev/null)"
+if [ "$ea1" = "[true,null]" ]; then
+  pass "EA1: protection-only PUT (acdp-ci) sets enforce_admins:true and required_status_checks:null"
+else
+  fail "EA1: protection-only PUT (acdp-ci) sets enforce_admins:true and required_status_checks:null" "got '$ea1'"
+fi
+
+# --- EA2: a has-checks repo that is not the registry gets enforce_admins:false
+#     and a contexts-only (unpinned) required_status_checks.
+FX="$FIXTURES_ROOT/playground-exact"
+LOG="$(new_log)"
+FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-playground >/dev/null 2>&1
+ea2="$(put_body_of "$LOG" | jq -c '[.enforce_admins,(.required_status_checks|has("checks")),(.required_status_checks|has("contexts"))]' 2>/dev/null)"
+if [ "$ea2" = "[false,false,true]" ]; then
+  pass "EA2: has-checks PUT (acdp-playground) sets enforce_admins:false with contexts and no checks pinning"
+else
+  fail "EA2: has-checks PUT (acdp-playground) sets enforce_admins:false with contexts and no checks pinning" "got '$ea2'"
+fi
+
+# --- #30: a full apply sweep never touches acdp-rs, and no mutating call ever
+#     targets a contents/ path (standardize.sh does not write files).
+CLEAN_FX="$(mktemp -d)"
+write_insync_fixture "$CLEAN_FX" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
+write_insync_fixture "$CLEAN_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
+write_insync_fixture "$CLEAN_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
+write_insync_fixture "$CLEAN_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+write_insync_fixture "$CLEAN_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
+write_insync_fixture "$CLEAN_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
+write_unprotected_fixture "$CLEAN_FX" acdp-ci
+write_unprotected_fixture "$CLEAN_FX" .github
+LOG="$(new_log)"
+FIXTURES="$CLEAN_FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" >/dev/null 2>&1
+rc=$?
+nmut="$(count_mutations "$LOG")"
+if [ "$rc" -eq 0 ] && [ "$nmut" -ge 16 ]; then
+  pass "#30: full apply sweep ran (16 mutating calls recorded) -- the next assertions are not vacuous"
+else
+  fail "#30: full apply sweep ran" "rc=$rc mutations=$nmut"
+fi
+if grep -Eq '/acdp-rs(/| |$)' "$LOG"; then
+  fail "#30: no gh call during a full sweep ever targets acdp-rs" "$(grep -E '/acdp-rs(/| |$)' "$LOG")"
+else
+  pass "#30: no gh call during a full sweep ever targets acdp-rs"
+fi
+# A write is an explicit -X/--method, OR (real gh) any -f/-F/--input body, which
+# flips the call to POST without an -X. Match all of them.
+if grep -E -- '/contents/' "$LOG" | grep -Eq -- '(^| )((-X|--method) (PATCH|PUT|POST|DELETE)|-f|-F|--input)( |$)'; then
+  fail "#30: no mutating call targets a contents/ path (standardize.sh never writes files)" "found"
+else
+  pass "#30: no mutating call targets a contents/ path (standardize.sh never writes files)"
+fi
+rm -rf "$CLEAN_FX"
+
+echo
+echo "== #19: UNREGISTERED org repos in the default --check sweep =="
+
+build_clean_sweep() {
+  d="$1"
+  write_insync_fixture "$d" acdp-control-plane "lint + tsc + jest (unit, coverage-gated)" "jest integration (Postgres)" "docker build (no push)"
+  write_insync_fixture "$d" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
+  write_insync_fixture "$d" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
+  write_insync_fixture "$d" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+  write_insync_fixture "$d" acdp-ui-console "Lint · Typecheck · Test · Build"
+  write_insync_fixture "$d" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
+  write_unprotected_fixture "$d" acdp-ci
+  write_unprotected_fixture "$d" .github
+}
+
+# B1: clean listing -> exit 0, no marker.
+U_FX="$(mktemp -d)"; build_clean_sweep "$U_FX"; write_org_listing "$U_FX"
+LOG="$(new_log)"
+out="$(FIXTURES="$U_FX" GH_LOG="$LOG" "$STANDARDIZE" --check 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -q "UNREGISTERED"; then
+  pass "B1: every org repo accounted for -> exit 0, no UNREGISTERED"
+else
+  fail "B1: every org repo accounted for -> exit 0, no UNREGISTERED" "rc=$rc out=$out"
+fi
+grep -q "orgs/$ORG/repos" "$LOG" && pass "B1: the sweep did enumerate the org (not vacuous)" || fail "B1: the sweep did enumerate the org (not vacuous)" "no orgs/ call in log"
+
+# B2: an unaccounted-for repo -> exit 1, named, no DRIFT, zero mutations.
+write_org_listing "$U_FX" acdp-newrepo:false
+LOG="$(new_log)"
+out="$(FIXTURES="$U_FX" GH_LOG="$LOG" "$STANDARDIZE" --check 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "!! UNREGISTERED: acdp-newrepo" && ! printf '%s' "$out" | grep -q "!! DRIFT"; then
+  pass "B2: unregistered repo -> exit 1, named, no DRIFT"
+else
+  fail "B2: unregistered repo -> exit 1, named, no DRIFT" "rc=$rc out=$out"
+fi
+printf '%s' "$out" | grep -q "unregistered org repo(s)" && pass "B2: summary names the unregistered condition" || fail "B2: summary names the unregistered condition" "$out"
+assert_zero_mutations "$LOG" "B2: --check stays read-only"
+
+# B5: an archived extra is ignored (and said so).
+write_org_listing "$U_FX" acdp-oldrepo:true
+out="$(FIXTURES="$U_FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "ignoring archived org repo: acdp-oldrepo"; then
+  pass "B5: archived extra repo is ignored, and reported as ignored"
+else
+  fail "B5: archived extra repo is ignored, and reported as ignored" "rc=$rc out=$out"
+fi
+
+# B3: the listing cannot be read -> exit 1 (a finding about the check itself), never a silent pass.
+rm -f "$U_FX/orgs_${ORG}_repos.json"
+out="$(FIXTURES="$U_FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "cannot enumerate org repos"; then
+  pass "B3: unreadable org listing -> exit 1 and says the check did not run"
+else
+  fail "B3: unreadable org listing -> exit 1 and says the check did not run" "rc=$rc out=$out"
+fi
+
+# B4: empty listing / listing missing a managed repo -> not trustworthy.
+echo '[]' > "$U_FX/orgs_${ORG}_repos.json"
+out="$(FIXTURES="$U_FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "cannot enumerate" && pass "B4a: empty listing -> exit 1, not a clean pass" || fail "B4a: empty listing -> exit 1, not a clean pass" "rc=$rc out=$out"
+write_org_listing "$U_FX"
+jq -c 'map(select(.name != "acdp-ui-console"))' "$U_FX/orgs_${ORG}_repos.json" > "$U_FX/x" && mv "$U_FX/x" "$U_FX/orgs_${ORG}_repos.json"
+out="$(FIXTURES="$U_FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "does not contain accounted-for repo 'acdp-ui-console'" && pass "B4b: listing missing a managed repo -> exit 1, names it" || fail "B4b: listing missing a managed repo -> exit 1, names it" "rc=$rc out=$out"
+
+# B9: stale exclusion (excluded repo gone from the org) -> exit 1, names it.
+write_org_listing "$U_FX"
+jq -c 'map(select(.name != "acdp-website"))' "$U_FX/orgs_${ORG}_repos.json" > "$U_FX/x" && mv "$U_FX/x" "$U_FX/orgs_${ORG}_repos.json"
+out="$(FIXTURES="$U_FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "accounted-for repo 'acdp-website'" && pass "B9: stale exclusion -> exit 1, names it" || fail "B9: stale exclusion -> exit 1, names it" "rc=$rc out=$out"
+
+# B6: naming a repo is a targeted check: no org enumeration.
+write_org_listing "$U_FX" acdp-newrepo:false
+LOG="$(new_log)"
+FIXTURES="$U_FX" GH_LOG="$LOG" "$STANDARDIZE" --check acdp-ci >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q "orgs/" "$LOG"; then
+  pass "B6: --check <repo> makes no org enumeration call (and ignores the unregistered repo)"
+else
+  fail "B6: --check <repo> makes no org enumeration call" "rc=$rc log=$(cat "$LOG")"
+fi
+
+# B7: apply mode never enumerates the org.
+LOG="$(new_log)"
+FIXTURES="$U_FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-ci >/dev/null 2>&1
+grep -q "orgs/" "$LOG" && fail "B7: apply mode makes no org enumeration call" "found orgs/ in log" || pass "B7: apply mode makes no org enumeration call"
+rm -rf "$U_FX"
+
+# G4 (strengthened after #19): the `--` terminator must keep EXPLICIT_REPOS, or
+# `--check -- <typo>` falls through to the full default sweep and, against a
+# clean org, exits 0 -- a false all-clear. Offline this needs a fully clean
+# sweep fixture: without one the fall-through fails for an unrelated reason
+# (missing fixtures) and the exit-non-zero assertion is vacuous.
+G4_FX="$(mktemp -d)"; build_clean_sweep "$G4_FX"; write_org_listing "$G4_FX"
+out="$(FIXTURES="$G4_FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check -- acdp-typo 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "not in the standard set"; then
+  pass "G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
+else
+  fail "G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)" "rc=$rc out=$out"
+fi
+rm -rf "$G4_FX"
+
+# B8: a repo that is both managed and excluded is a config error (exit 2).
+CFG_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/std-cfg.XXXXXX")"
+sed 's/^EXCLUDED_REPOS="acdp-rs acdp-website"/EXCLUDED_REPOS="acdp-rs acdp-ci acdp-website"/' "$STANDARDIZE" > "$CFG_SCRIPT"
+LOG="$(new_log)"
+out="$(FIXTURES="$FIXTURES_ROOT/unprotected" GH_LOG="$LOG" bash "$CFG_SCRIPT" --check acdp-ci 2>&1)"; rc=$?
+rm -f "$CFG_SCRIPT"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "in both ALL_REPOS and EXCLUDED_REPOS" && [ ! -s "$LOG" ]; then
+  pass "B8: managed-and-excluded overlap is a config error (exit 2, before any gh call)"
+else
+  fail "B8: managed-and-excluded overlap is a config error (exit 2, before any gh call)" "rc=$rc out=$out"
+fi
 
 echo
 echo "===================="
