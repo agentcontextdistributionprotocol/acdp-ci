@@ -322,6 +322,7 @@ assert_zero_mutations "$LOG" "case10: api-failure -> no -X in GH_LOG"
 SCRATCH_5TH="$(mktemp -d)"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" "$SCRATCH_5TH/"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_contents_.github_required-checks.json.json" "$SCRATCH_5TH/"
+cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main_protection.json" "$SCRATCH_5TH/"
 jq '.protection.required_status_checks.contexts += ["nightly fuzz (spec fixtures)"]
     | .protection.required_status_checks.checks += [{"context":"nightly fuzz (spec fixtures)","app_id":15368}]' \
   "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main.json" \
@@ -525,6 +526,7 @@ write_org_listing() {
 # .github/required-checks.json (raw) from the canonical fixture.
 write_registry_baseline() {
   cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_contents_.github_required-checks.json.json" "$1/"
+  cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main_protection.json" "$1/"
 }
 
 SWEEP_FX="$(mktemp -d)"
@@ -717,6 +719,7 @@ rm -rf "$CLEAN_SWEEP2_FX"
 SCRATCH_BOTH="$(mktemp -d)"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" "$SCRATCH_BOTH/"
 cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_contents_.github_required-checks.json.json" "$SCRATCH_BOTH/"
+cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main_protection.json" "$SCRATCH_BOTH/"
 jq '.protection.required_status_checks.contexts = ["rustfmt","clippy","tests","nightly fuzz (spec fixtures)"]
     | .protection.required_status_checks.checks = [
         {"context":"rustfmt","app_id":15368},
@@ -971,7 +974,8 @@ GOOD_BASE="$FIXTURES_ROOT/registry-rs-insync/$BASE_REL"
 new_registry_fx() {
   d="$(mktemp -d)"
   cp "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs.json" \
-     "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main.json" "$d/"
+     "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main.json" \
+     "$FIXTURES_ROOT/registry-rs-insync/repos_${ORG}_acdp-registry-rs_branches_main_protection.json" "$d/"
   cp "$GOOD_BASE" "$d/$BASE_REL"
   echo "$d"
 }
@@ -1060,11 +1064,42 @@ out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registr
 { [ "$rc" -eq 1 ] && [ "$(count_mutations "$LOG")" -eq 0 ]; } && pass "A4: apply is blocked by that DRIFT, zero mutations" || fail "A4: apply is blocked by that DRIFT" "rc=$rc"
 rm -rf "$FX"
 
+# A9: the registry's own file may not WEAKEN live protection unless --allow-check-removal.
+PROT_REL="repos_${ORG}_acdp-registry-rs_branches_main_protection.json"
+FX="$(new_registry_fx)"
+jq -c '.enforce_admins=false' "$GOOD_BASE" > "$FX/$BASE_REL"
+out="$(FIXTURES="$FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "!! DRIFT: acdp-registry-rs: .*WEAKEN live protection.*enforce_admins true -> false"; } && pass "A9: baseline lowering enforce_admins -> DRIFT in --check, exit 1" || fail "A9: baseline lowering enforce_admins -> DRIFT in --check" "rc=$rc out=$out"
+LOG="$(new_log)"
+out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ "$(count_mutations "$LOG")" -eq 0 ] && printf '%s' "$out" | grep -q "use --allow-check-removal"; } && pass "A9: apply refuses to lower enforce_admins, zero mutations" || fail "A9: apply refuses to lower enforce_admins" "rc=$rc out=$out"
+LOG="$(new_log)"
+FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" --allow-check-removal acdp-registry-rs >/dev/null 2>&1; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$(put_body_of "$LOG" | jq -c .enforce_admins)" = "false" ]; } && pass "A9: --allow-check-removal lets the lowering through" || fail "A9: --allow-check-removal lets the lowering through" "rc=$rc"
+rm -rf "$FX"
+# A9b: re-pinning a live check to a different app is a weakening; pinning a live-null check is not.
+FX="$(new_registry_fx)"
+jq -c '.required |= map(if .context=="clippy" then .app_id=99 else . end)' "$GOOD_BASE" > "$FX/$BASE_REL"
+out="$(FIXTURES="$FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'check "clippy" app_id 15368 -> 99'; } && pass "A9b: baseline re-pinning a live check to another app -> DRIFT" || fail "A9b: baseline re-pinning a live check -> DRIFT" "rc=$rc out=$out"
+rm -rf "$FX"
+FX="$(new_registry_fx)"
+jq -c '.protection.required_status_checks.checks |= map(if .context=="clippy" then .app_id=null else . end)' "$FX/repos_${ORG}_acdp-registry-rs_branches_main.json" > "$FX/b.json" && mv "$FX/b.json" "$FX/repos_${ORG}_acdp-registry-rs_branches_main.json"
+out="$(FIXTURES="$FX" GH_LOG="$(new_log)" "$STANDARDIZE" --check acdp-registry-rs 2>&1)"
+printf '%s' "$out" | grep -q "WEAKEN" && fail "A9b: pinning a live null-app check is a strengthening, not reported" "$out" || pass "A9b: pinning a live null-app check is a strengthening, not reported"
+rm -rf "$FX"
+# A9c: unreadable protection endpoint -> fail closed, zero mutations.
+FX="$(new_registry_fx)"; rm "$FX/$PROT_REL"
+LOG="$(new_log)"
+out="$(FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ "$(count_mutations "$LOG")" -eq 0 ]; } && pass "A9c: protection endpoint unreadable -> apply aborts, zero mutations" || fail "A9c: protection endpoint unreadable -> apply aborts" "rc=$rc out=$out"
+rm -rf "$FX"
+
 # A5: the PUT carries the FILE's values, not hardcoded ones.
 FX="$(new_registry_fx)"
 jq -c '.enforce_admins=false | .strict=false | .required |= map(.app_id=99)' "$GOOD_BASE" > "$FX/$BASE_REL"
 LOG="$(new_log)"
-FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" acdp-registry-rs >/dev/null 2>&1
+FIXTURES="$FX" GH_LOG="$LOG" GH_STUB_RECORD=1 "$STANDARDIZE" --allow-check-removal acdp-registry-rs >/dev/null 2>&1
 body="$(put_body_of "$LOG")"
 got="$(printf '%s' "$body" | jq -c '[.enforce_admins,.required_status_checks.strict,([.required_status_checks.checks[].app_id]|unique)]')"
 [ "$got" = "[false,false,[99]]" ] && pass "A5: PUT takes enforce_admins, strict and app_id from the baseline file" || fail "A5: PUT takes enforce_admins, strict and app_id from the baseline file" "got '$got'"

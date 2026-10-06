@@ -14,7 +14,7 @@ repo stays uniform instead of drifting.
 
 | Composite action | Purpose |
 |---|---|
-| [`actions/npm-relock`](actions/npm-relock/relock.sh) | Used by `bump-consume.yml` (npm): wait for every optional platform package of the target, relock, and verify `npm ci --dry-run`; fails closed. `bump-consume.yml` also takes a `node-version` input (default `22`; match the consumer's CI). |
+| [`actions/npm-relock`](actions/npm-relock/relock.sh) | Used by `bump-consume.yml` (npm): wait for every optional platform package of the target, relock, and verify `npm ci --dry-run`; fails closed. `bump-consume.yml` also takes a `node-version` input (default `22`; used only when the consumer has no `.nvmrc` / `.node-version`, which wins). |
 | [`actions/auto-merge-gate`](actions/auto-merge-gate/decide.sh) | Used by `auto-merge.yml`: decides arm vs hold (patch/minor arm; majors and `exclude-dependencies` / `exclude-groups` matches hold) and disarms a stale arm for deny-list holds only. |
 | [`actions/checkout-spec`](actions/checkout-spec/README.md) | Check out the ACDP spec at a SHA-verified pinned ref, **inside your own job** (a `uses:` step, not a separate reusable-workflow job) — exports `ACDP_SPEC_DIR` and a `path` output. See [DELIVERY-STANDARD.md](DELIVERY-STANDARD.md) for the adoption recipe. |
 

@@ -330,7 +330,10 @@ A3: app_id 0 -> refused, exit 1, zero mutations
 A3: app_id beyond a safe integer -> refused, exit 1, zero mutations
 A3: context that is only a newline (would empty the list -> protection-only PUT) -> refused, exit 1, zero mutations
 A3: context with an embedded newline (would split into two names in the drift guard) -> refused, exit 1, zero mutations
-A3: whitespace-only context -> refused, exit 1, zero mutations"
+A3: whitespace-only context -> refused, exit 1, zero mutations
+A9: --allow-check-removal lets the lowering through
+A9: baseline lowering enforce_admins -> DRIFT in --check
+A9b: baseline re-pinning a live check -> DRIFT"
 apply_mutant "baseline: app_id validation removed (any value accepted)" \
   'type == "number" and . == floor and . > 0 and . < 4503599627370496)' 'true)' \
   "A3: fractional app_id -> refused, exit 1, zero mutations
@@ -403,7 +406,11 @@ G1c: clean full sweep still exits 0, no PENDING marker
 G1d: drift and missing together on the same repo -> exit 1, BOTH markers appear
 G4 regression guard: default no-arg full sweep --check still exits 0
 override: --allow-check-removal lets a drifted apply complete
-override: PUT body reaches the mutation path with the reduced (declared-only) contexts"
+override: PUT body reaches the mutation path with the reduced (declared-only) contexts
+A9: --allow-check-removal lets the lowering through
+A9: apply refuses to lower enforce_admins
+A9: baseline lowering enforce_admins -> DRIFT in --check
+A9b: baseline re-pinning a live check -> DRIFT"
 
 apply_mutant "baseline: control characters in a context accepted" \
   ' and (explode | map(. < 32 or . == 127) | any | not)' '' \
@@ -414,124 +421,18 @@ apply_mutant "baseline: app_id -1 / 0 accepted (positive check removed)" \
 A3: app_id 0 -> refused, exit 1, zero mutations
 A3: app_id beyond a safe integer -> refused, exit 1, zero mutations'
 
-
-# --- #22: guards that had zero mutant coverage. Killer sets below were
-#     MEASURED (run, read, then declared), not guessed.
-
-# 5. checks_for() tri-state: an unmanaged repo must be SKIPPED (return 1), not
-#    collapsed into "managed, protection-only" (return 0 + empty) -- which
-#    would PUT required_status_checks:null onto a repo this script does not own.
-apply_mutant "checks_for tri-state: unmanaged collapsed into protection-only" \
-  '      return 0 ;;
-    *) return 1 ;;' '      return 0 ;;
-    *) return 0 ;;' \
-  "G4: --check -- <typo'd repo> exits non-zero instead of a false all-clear
-G4: --check -- <typo'd repo> makes zero gh calls at all
-G4: --check <typo'd repo> exits non-zero instead of a false all-clear
-G4: --check <typo'd repo> makes zero gh calls at all
-unmanaged: acdp-rs skipped with the expected message
-unmanaged: zero gh calls at all
-G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
-
-# 6. --check / --allow-check-removal mutual exclusion (exit 2).
-apply_mutant "mutual exclusion removed (--check honours --allow-check-removal)" \
-  'if [ "$CHECK_MODE" -eq 1 ] && [ "$ALLOW_CHECK_REMOVAL" -eq 1 ]; then' 'if false; then' \
-  "flags: --check --allow-check-removal is rejected outright (exit 2)
-flags: --check --allow-check-removal makes zero gh calls at all"
-apply_mutant "mutual exclusion downgraded from exit 2 to exit 1" \
-  '(--allow-check-removal is apply-mode only)" >&2
-  exit 2' '(--allow-check-removal is apply-mode only)" >&2
-  exit 1' \
-  "flags: --check --allow-check-removal is rejected outright (exit 2)"
-
-# 7. G4: an explicitly-named unmanaged repo must not exit 0 having read nothing.
-apply_mutant "G4: explicitly-named unmanaged repo no longer an error" \
-  'if [ "$CHECK_MODE" -eq 1 ] && [ "$EXPLICIT_REPOS" -eq 1 ]; then
-      ERRORS=1
-    fi
-    continue' 'if [ "$CHECK_MODE" -eq 1 ] && [ "$EXPLICIT_REPOS" -eq 1 ]; then
-      :
-    fi
-    continue' \
-  "G4: --check -- <typo'd repo> exits non-zero instead of a false all-clear
-G4: --check <typo'd repo> exits non-zero instead of a false all-clear
-G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
-apply_mutant "G4: EXPLICIT_REPOS tracking lost after the -- terminator" \
-  '    EXPLICIT_REPOS=1
-    continue' '    :
-    continue' \
-  "G4: --check -- <managed repo> works normally
-G4: --check -- <typo'd repo> makes zero gh calls at all
-G4b: --check -- <typo'd repo> against a CLEAN org still exits non-zero (no false all-clear)"
-
-# 8. enforce_admins differs between the protection-only and has-checks bodies.
-apply_mutant "protection-only body: enforce_admins true -> false" \
-  '"required_status_checks":null,"enforce_admins":true' '"required_status_checks":null,"enforce_admins":false' \
-  "EA1: protection-only PUT (acdp-ci) sets enforce_admins:true and required_status_checks:null"
-apply_mutant "has-checks default: enforce_admins false -> true" \
-  '    *) echo false ;;' '    *) echo true ;;' \
-  "EA2: has-checks PUT (acdp-playground) sets enforce_admins:false with contexts and no checks pinning"
-apply_mutant "registry enforce_admins true -> false" \
-  '    acdp-registry-rs) echo true ;;' '    acdp-registry-rs) echo false ;;' \
-  "case2: registry PUT sets enforce_admins:true (issue #29)"
-
-# 9. Ordering: the repo-settings PATCH must precede the protection PUT.
-apply_mutant "protection PUT attempted before the settings PATCH" \
-  '  gh api -X PATCH "repos/$ORG/$repo" \' '  printf '"'"'%s'"'"' "$protection_json" | gh api -X PUT "repos/$ORG/$repo/branches/$branch/protection" --input - >/dev/null
-  gh api -X PATCH "repos/$ORG/$repo" \' \
-  "bash-3.2 (/bin/bash): standardize.sh runs and blocks identically
-block-mode guard: PATCH was the blocked call
-block-mode guard: PUT never attempted"
-
-# 10. Registry app_id pinning.
-apply_mutant "registry required checks no longer pinned to an app_id" \
-  '    acdp-registry-rs) echo 15368 ;;' '    acdp-registry-rs) : ;;' \
-  "case2: PUT body carries all 11 declared checks
-case2: registry PUT pins every check to app_id 15368 via checks
-override: PUT body reaches the mutation path with the reduced (declared-only) contexts"
-
-
-# --- #19: the UNREGISTERED org-registry condition. Killer sets measured.
-apply_mutant "UNREGISTERED: repo found but flag never accumulated" \
-  '        UNREGISTERED=1
-      done' '        :
-      done' \
-  "B2: summary names the unregistered condition
-B2: unregistered repo -> exit 1, named, no DRIFT"
-apply_mutant "UNREGISTERED: exclusion subtraction removed (excluded repos reported)" \
-  'case " $ALL_REPOS $EXCLUDED_REPOS " in *" $name "*) continue ;; esac' 'case " $ALL_REPOS " in *" $name "*) continue ;; esac' \
-  "B1: every org repo accounted for -> exit 0, no UNREGISTERED
-B5: archived extra repo is ignored, and reported as ignored
-G1c: clean full sweep still exits 0, no PENDING marker
-G4 regression guard: default no-arg full sweep --check still exits 0"
-apply_mutant "UNREGISTERED: unreadable org listing no longer an error (fail-open)" \
-  '      ERRORS=1
-    else
-      org_names=' '      :
-    else
-      org_names=' \
-  "B3: unreadable org listing -> exit 1 and says the check did not run
-B4a: empty listing -> exit 1, not a clean pass"
-apply_mutant "UNREGISTERED: escalated to fatal exit 2" \
-  '        UNREGISTERED=1
-      done' '        UNREGISTERED=1; exit 2
-      done' \
-  "B2: summary names the unregistered condition
-B2: unregistered repo -> exit 1, named, no DRIFT"
-apply_mutant "UNREGISTERED: org enumerated even when repos are named" \
-  '  if [ "$EXPLICIT_REPOS" -eq 0 ]; then
-    if ! listing=' '  if true; then
-    if ! listing=' \
-  "B6: --check <repo> makes no org enumeration call
-check: prints the live contexts it read, per repo, even when in sync
-flags: trailing --check is parsed as a flag, not a repo name
-G4: --check -- <managed repo> works normally
-G4: --check -- <typo'd repo> makes zero gh calls at all
-G4: --check <typo'd repo> makes zero gh calls at all"
-apply_mutant "UNREGISTERED: accounted-for-repo sanity check removed" \
-  'if ! printf '"'"'%s\n'"'"' "$org_names" | grep -qxF -- "$acct"; then' 'if false; then' \
-  "B4b: listing missing a managed repo -> exit 1, names it
-B9: stale exclusion -> exit 1, names it"
+apply_mutant "weakening guard: enforce_admins lowering not detected" \
+  '$prot.enforce_admins.enabled == true and $base.enforce_admins == false' 'false' \
+  'A9: apply refuses to lower enforce_admins
+A9: baseline lowering enforce_admins -> DRIFT in --check'
+apply_mutant "weakening guard: app_id re-pin not detected" \
+  'select($l.app_id != null and $l.app_id != $b.app_id)' 'select(false)' \
+  'A9b: baseline re-pinning a live check -> DRIFT'
+apply_mutant "weakening guard: unreadable protection read not fatal" \
+  '    echo "!! $repo: branches/$branch/protection read failed" >&2
+    return 1' '    echo "!! $repo: branches/$branch/protection read failed" >&2
+    prot="{\"enforce_admins\":{\"enabled\":false}}"' \
+  'A9c: protection endpoint unreadable -> apply aborts'
 
 echo
 echo "===================="

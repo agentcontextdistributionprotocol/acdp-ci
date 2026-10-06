@@ -149,6 +149,10 @@
 # a normal apply — nothing here would notice or restore it. Extending the
 # guard to compare the full protection object (not just contexts) is a
 # named wave-6 item, not attempted in this change.
+# (Partial exception: for acdp-registry-rs, whose baseline file can be edited
+# without review, apply refuses to LOWER enforce_admins or re-pin a live check to
+# another app unless --allow-check-removal is passed; --check reports it as DRIFT.
+# See baseline_regressions().)
 #
 # acdp-registry-rs's required checks are NOT declared in checks_for(): that repo
 # commits its own baseline (.github/required-checks.json, which its daily
@@ -395,6 +399,33 @@ live_contexts() {
   return 0
 }
 
+# baseline_regressions REPO BRANCH -> prints one line per way the repo's own
+# baseline file would WEAKEN live protection: enforce_admins true -> false, or a
+# live check pinned to app X re-pinned to a different app Y. (Null -> pinned is a
+# strengthening and not reported.) Needs the protection endpoint because the
+# branch payload carries no enforce_admins. Fails closed (return 1) when either
+# read is unusable: a guard that cannot see live state must not wave a PUT through.
+baseline_regressions() {
+  local repo="$1" branch="$2" prot br
+  if ! prot=$(gh api "repos/$ORG/$repo/branches/$branch/protection" 2>/dev/null); then
+    echo "!! $repo: branches/$branch/protection read failed" >&2
+    return 1
+  fi
+  if ! br=$(gh api "repos/$ORG/$repo/branches/$branch" 2>/dev/null); then
+    echo "!! $repo: branches/$branch read failed" >&2
+    return 1
+  fi
+  jq -nr --argjson base "$BASE_BODY" --argjson prot "$prot" --argjson br "$br" '
+    ( if ($prot.enforce_admins.enabled | type) != "boolean" then error("no enforce_admins.enabled in protection payload") else . end
+    | [ (if $prot.enforce_admins.enabled == true and $base.enforce_admins == false
+         then "enforce_admins true -> false" else empty end),
+        ( ($br.protection.required_status_checks.checks // [])[] as $l
+        | ($base.required[] | select(.context == $l.context)) as $b
+        | select($l.app_id != null and $l.app_id != $b.app_id)
+        | "check \"\($l.context)\" app_id \($l.app_id) -> \($b.app_id)" ) ]
+    | .[] )' 2>/dev/null
+}
+
 # --- flag parsing: every argument, not just leading ones -----------------
 CHECK_MODE=0
 ALLOW_CHECK_REMOVAL=0
@@ -631,6 +662,33 @@ for repo in $repos; do
     extras_clean=0
   else
     extras_clean=1
+  fi
+
+  # --- weakening guard (baseline repos): the repo's own file may not quietly
+  # lower enforce_admins or re-pin a live check to another app. Same override
+  # and same DRIFT/exit contract as the extras axis above. ---
+  if [ "$baseline" -eq 1 ]; then
+    if ! regress=$(baseline_regressions "$repo" "$branch"); then
+      if [ "$CHECK_MODE" -eq 1 ]; then
+        ERRORS=1
+        UNREADABLE=$((UNREADABLE + 1))
+        continue
+      fi
+      echo "!! $repo: cannot compare the baseline against live protection — aborting before any mutation" >&2
+      exit 1
+    fi
+    if [ -n "$regress" ]; then
+      regress_list=$(printf '%s' "$regress" | paste -sd ';' - | sed 's/;/; /g')
+      if [ "$ALLOW_CHECK_REMOVAL" -eq 1 ]; then
+        echo "!! $repo: --allow-check-removal set — proceeding despite the baseline weakening live protection: $regress_list"
+      elif [ "$CHECK_MODE" -eq 1 ]; then
+        echo "!! DRIFT: $repo: $declared_src would WEAKEN live protection on the next apply: $regress_list"
+        DRIFT=1
+      else
+        echo "!! DRIFT: $repo: $declared_src would WEAKEN live protection: $regress_list (use --allow-check-removal to override)" >&2
+        exit 1
+      fi
+    fi
   fi
 
   # --- missing = declared - live: checks_for() lists a name that isn't
