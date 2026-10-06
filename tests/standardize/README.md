@@ -162,7 +162,7 @@ assertions would *notice* if `standardize.sh` stopped behaving correctly. A
 test that passes with the bug injected is worth nothing, and from the outside
 it is indistinguishable from one that works — green either way.
 
-`./tests/standardize/mutants.sh` injects twenty-nine known bugs and requires the
+`./tests/standardize/mutants.sh` injects thirty-two known bugs and requires the
 suite to fail on each (killer sets for all but the original four were *measured*, not guessed):
 
 | mutant | assertions that catch it |
@@ -188,20 +188,23 @@ suite to fail on each (killer sets for all but the original four were *measured*
 | UNREGISTERED: org enumerated even when repos are named | 6 |
 | UNREGISTERED: accounted-for-repo sanity check removed | 2 |
 | baseline: empty `required` accepted | 1 |
-| baseline: status 3 (remote baseline) treated as protection-only | 43 |
+| baseline: status 3 (remote baseline) treated as protection-only | 46 |
 | baseline: `app_id` validation removed (any value accepted) | 6 |
 | baseline: unreadable baseline not an error in `--check` | 1 |
 | baseline: apply carries on silently when the baseline is unreadable | 23 |
 | baseline: `strict` hardcoded true | 1 |
-| baseline: raw media type not requested | 20 |
+| baseline: raw media type not requested | 24 |
 | baseline: control characters in a context accepted | 1 |
 | baseline: `app_id` -1 / 0 accepted (positive check removed) | 3 |
+| weakening guard: enforce_admins lowering not detected | 2 |
+| weakening guard: app_id re-pin not detected | 1 |
+| weakening guard: unreadable protection read not fatal | 1 |
 
-(The 43-killer row is deliberately broad: if status 3 were ever read as 0 the
+(The 46-killer row is deliberately broad: if status 3 were ever read as 0 the
 empty list would mean "protection-only" and `required_status_checks:null` would
 wipe every registry check. It is a hazard guard, not a precision mutant.)
 
-**Honest coverage:** 77 distinct assertions of 143 are mutation-measured
+**Honest coverage:** 82 distinct assertions of 149 are mutation-measured
 (acdp-ci#22 asked for the guards with zero coverage, not one mutant per
 assertion — all five it listed are now covered; one mutant per guard variant,
 not the plan's two for `enforce_admins`-registry and `app_id`). The rest are unmeasured, not

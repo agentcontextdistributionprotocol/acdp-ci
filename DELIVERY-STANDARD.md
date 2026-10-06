@@ -209,8 +209,9 @@ not repeated here.
    and passes `npm ci --dry-run` — a release publishes the main package before
    its platform packages, and an un-verified relock in that window silently
    drops them (acdp-ci#28), so a bad lock now fails the bump job instead of
-   opening a red PR; the `node-version` input (default `22`) should match the
-   consumer's CI; `cargo` edits the
+   opening a red PR; the consumer's `.nvmrc` / `.node-version` picks the Node
+   version (the `node-version` input, default `22`, is the fallback) so the lock is
+   written by the same npm major as its CI; `cargo` edits the
    version in place preserving `features`, virtual-workspace-safe, then
    `cargo update --precise`; `uv` runs `uv lock --upgrade-package`), opens a PR,
    and arms auto-merge **unless the bump is breaking** (major, or a `0.x` minor).

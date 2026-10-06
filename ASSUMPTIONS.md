@@ -122,7 +122,7 @@
 - **Chose:** composite action `actions/npm-relock` referenced at `@v1`; job `timeout-minutes: 15` (also applies to cargo/uv paths).
 - **Alternatives:** exposing attempts/sleep as workflow inputs; auto-detecting node version from consumer; exact-version equality.
 - **Blast radius if wrong:** a slow publish makes the bump job fail (re-run fixes it); no bad PR is ever opened.
-- **Status:** UNCONFIRMED
+- **Status:** CONFIRMED (2026-10-06) — see DECISIONS.md.
 
 ## auto-merge deny lists
 - **Plan:** plans/open-issues-sweep.md
@@ -130,12 +130,12 @@
 - **Chose:** `actions/auto-merge-gate` composite (decide.sh/disarm.sh), fail-safe hold only for `exclude-dependencies`; disarm only on deny holds; per-PR concurrency group; no disarm if the gate step itself fails (G4, accepted).
 - **Alternatives:** a `gate-script` input loaded from the base SHA (deferred until a repo needs acdp-rs-style lockfile gating); `!cancelled()` disarm.
 - **Blast radius if wrong:** an unevaluable group list arms (documented asymmetry); a stale arm can survive a gate-step failure.
-- **Status:** UNCONFIRMED
+- **Status:** CONFIRMED (2026-10-06) — see DECISIONS.md.
 
 ## standardize.sh: mutants, UNREGISTERED and the registry baseline
 - **Plan:** plans/open-issues-sweep.md (Phases 2-4)
-- **Assumed:** (a) `app_id: null` in the registry baseline is rejected, never defaulted (pinning is the point of the file); (b) #22 can close once all five guards it listed are mutation-covered (77 of 143 assertions measured; the rest are unmeasured, not known-good); (c) forks are not auto-ignored by the UNREGISTERED check (an org fork must be listed in EXCLUDED_REPOS); (d) org-listing pagination is exercised by `gh api --paginate`, not offline; (e) trust direction flips for the registry: its own repo file now decides the declared checks, so a PR there that weakens `.github/required-checks.json` weakens protection at the next apply (it is reviewed there, and `--check` still reports drift).
+- **Assumed:** (a) `app_id: null` in the registry baseline is rejected, never defaulted (pinning is the point of the file); (b) #22 can close once all five guards it listed are mutation-covered (77 of 143 assertions measured; the rest are unmeasured, not known-good); (c) forks are not auto-ignored by the UNREGISTERED check (an org fork must be listed in EXCLUDED_REPOS); (d) org-listing pagination is exercised by `gh api --paginate`, not offline; (e) trust direction flips for the registry: its own repo file now decides the declared checks. NO review is required on that file (no CODEOWNERS, no required reviews), so the guard is apply-side: apply refuses to lower `enforce_admins` or re-pin a live check to another app without `--allow-check-removal`, and `--check` reports it as DRIFT.
 - **Chose:** fail-closed validation of the baseline; UNREGISTERED reported as a finding (exit 1), not fatal.
 - **Alternatives:** keep hand-copied lists (the #33 drift problem); defaulting a null app_id to any-app.
 - **Blast radius if wrong:** a rejected baseline stops registry protection from applying (drift-check reports UNREADABLE); a mis-listed exclusion hides one repo from the UNREGISTERED report.
-- **Status:** UNCONFIRMED
+- **Status:** CONFIRMED (2026-10-06) — see DECISIONS.md.

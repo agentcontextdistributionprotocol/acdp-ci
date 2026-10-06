@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ''
   exclude-groups:
-    description: 'Newline/comma separated globs; a PR in a matching Dependabot group is held.'
+    description: 'Newline/comma separated globs; a PR in a matching Dependabot group is held. A convenience only: an ungrouped PR has no group, so list crypto-critical crates in exclude-dependencies.'
     required: false
     default: ''
   pr-url:

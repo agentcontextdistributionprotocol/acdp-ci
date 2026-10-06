@@ -45,7 +45,7 @@ on:
         type: string
         default: ''
       node-version:
-        description: 'Node version for the npm ecosystem; match the consumer''s CI so the lockfile is written by the same npm major'
+        description: 'Node version for the npm ecosystem when the consumer has no .nvmrc / .node-version (the file wins, so the lockfile is written by the same npm major as its CI)'
         required: false
         type: string
         default: '22'
@@ -74,10 +74,20 @@ jobs:
         with:
           token: ${{ steps.app.outputs.token }}
 
+      - name: Pick the Node version source (npm)
+        id: nodever
+        if: ${{ inputs.ecosystem == 'npm' }}
+        run: |
+          for f in .nvmrc .node-version; do
+            if [ -f "$f" ]; then echo "file=$f" >> "$GITHUB_OUTPUT"; exit 0; fi
+          done
+          echo "file=" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@v7
         if: ${{ inputs.ecosystem == 'npm' }}
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ steps.nodever.outputs.file == '' && inputs.node-version || '' }}
+          node-version-file: ${{ steps.nodever.outputs.file }}
 
       - name: Resolve versions
         id: v
