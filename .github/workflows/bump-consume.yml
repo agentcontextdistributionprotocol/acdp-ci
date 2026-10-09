@@ -8,7 +8,7 @@ name: bump-consume
 #
 # Auth: the acdp-deps-bot GitHub App (org secrets ACDP_BOT_APP_ID /
 # ACDP_BOT_PRIVATE_KEY). Installation tokens trigger CI on the bot PR (which
-# GITHUB_TOKEN cannot) and never expire — so there are no PATs anywhere.
+# GITHUB_TOKEN cannot) and are short-lived (1h, minted per run) — so there are no PATs anywhere.
 #
 # Caller shape:
 #   on:
