@@ -13,7 +13,7 @@ The decision logic is [`decide.sh`](decide.sh); the disarm step is
 ```mermaid
 flowchart TD
   A["update-type"] --> B{"allow-major true,<br/>or patch / minor?"}
-  B -- "no (major)" --> H1["HOLD<br/>(not a deny hold)"]
+  B -- "no (major, or any other<br/>unrecognised type)" --> H1["HOLD<br/>(not a deny hold)"]
   B -- yes --> C{"exclude-groups set<br/>and PR has a group?"}
   C -- "group matches a glob" --> H2["HOLD by deny list"]
   C -- "no match / no group" --> D{"exclude-dependencies set?"}
@@ -28,6 +28,8 @@ flowchart TD
   H4 --> X
 ```
 
+- This action only decides. After `eligible=true`, `auto-merge.yml` itself runs a separate guard
+  and **hard-fails** (arms nothing) if the base branch has no required status checks.
 - With both deny lists empty the rule is exactly "arm on patch/minor, hold majors".
 - Deny lists only ever **add** holds. A hold by the major rule is *never* disarmed (a human
   may have armed a major on purpose); only deny-list holds disarm.

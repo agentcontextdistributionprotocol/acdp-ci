@@ -10,6 +10,7 @@ flowchart LR
   spec["spec repo change<br/>(schemas / examples / rfcs / registries)"] -- "spec-released" --> bs["bump-spec-ref.yml"]
   dep["Dependabot PR"] --> am["auto-merge.yml"]
   bc --> pr["bot PR in the consumer"]
+  bc -. "non-breaking bump: arms auto-merge" .-> merge
   bs --> pr
   pr --> ci["consumer's own CI"]
   am --> arm{"gate: patch / minor,<br/>deny lists clear?"}
@@ -31,7 +32,7 @@ The spec itself and its RFC process live in the
 | Reusable workflow | Purpose |
 |---|---|
 | [`.github/workflows/auto-merge.yml`](.github/workflows/auto-merge.yml) | Auto-merge Dependabot PRs once required checks pass. Runs only for `dependabot[bot]`, one run per PR at a time. Patch + minor unattended; **majors held** (`allow-major: true` arms them). Optional `exclude-dependencies` / `exclude-groups` globs hold matching PRs (and disarm a stale arm). **Hard-fails** if the base branch has no required status checks — it will not arm on an ungated branch. Decision logic: [`actions/auto-merge-gate`](actions/auto-merge-gate/README.md). |
-| [`.github/workflows/bump-consume.yml`](.github/workflows/bump-consume.yml) | Consume a new `acdp` SDK release: resolve version (`version` input, else event payload, else latest) → wait for the registry (24×5 s) → bump → PR on `deps/<name>-<ver>` (a no-op if that branch already exists) → arm auto-merge. 15-minute job timeout. Ecosystems: `npm` (edits the manifest, then [`npm-relock`](actions/npm-relock/README.md) waits for every platform package, relocks and verifies `npm ci --dry-run`, failing closed), `cargo` (edits `Cargo.toml`, `cargo update --precise`), `uv` (lockfile only: `uv lock --upgrade-package`; `pyproject.toml` is untouched). A 0.x minor counts as breaking; with no required checks on the base branch it **warns and skips arming** instead of failing. Inputs: `ecosystem`, `package` (default `acdp`), `version`, `node-version` (default `22`; used only when the consumer has no `.nvmrc` / `.node-version`, which wins), `allow-major`. |
+| [`.github/workflows/bump-consume.yml`](.github/workflows/bump-consume.yml) | Consume a new `acdp` SDK release: resolve version (event payload, else the `version` input, else latest) → wait for the registry (24×5 s) → bump → PR on `deps/<name>-<ver>` (a no-op if that branch already exists) → arm auto-merge. 15-minute job timeout. Ecosystems: `npm` (edits the manifest, then [`npm-relock`](actions/npm-relock/README.md) waits for every platform package, relocks and verifies `npm ci --dry-run`, failing closed), `cargo` (edits `Cargo.toml`, `cargo update --precise`), `uv` (lockfile only: `uv lock --upgrade-package`; `pyproject.toml` is untouched). A 0.x minor counts as breaking, and a breaking bump still opens the PR but is **not armed** unless `allow-major`; with no required checks on the base branch it **warns and skips arming** instead of failing. Inputs: `ecosystem`, `package` (default `acdp`), `version`, `node-version` (default `22`; used only when the consumer has no `.nvmrc` / `.node-version`, which wins), `allow-major`. |
 | [`.github/workflows/bump-spec-ref.yml`](.github/workflows/bump-spec-ref.yml) | Adopt a new pinned ACDP spec SHA: rewrite the pinned `ref:` in the target workflow `file` (default `.github/workflows/ci.yml`) → PR on `deps/spec-<sha12>`. Inputs `file`, `spec-repo`, `sha` (blank = event payload, else spec `HEAD`). Requires **exactly one** pin anchor in the file; zero or several fail loudly. **Held, never auto-merged** — the PR's own conformance CI runs against the new fixtures, and a human adopts the new spec deliberately. |
 
 | Composite action | Purpose |
@@ -42,7 +43,7 @@ The spec itself and its RFC process live in the
 
 | Script | Purpose |
 |---|---|
-| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection to every managed repo. `allow_auto_merge` and required status checks are per-repo; zero-check repos (`acdp-ci`, `.github`) get protection only, never auto-merge. Required checks come from `checks_for()` — except `acdp-registry-rs`, whose checks and `enforce_admins` come from **its own** `.github/required-checks.json`. `--check` (alias `--dry-run`) is a read-only drift survey that mutates nothing. Exit **0** = clean; **1** = a result (drift, a declared check not yet applied, an `UNREGISTERED` org repo, an unreadable repo, or a named unmanaged repo); **2** = the check could not run (bad flags, missing dependency, config error, every repo unreadable). Fail-closed on apply: refuses to remove a live required check it doesn't declare, or to weaken a registry baseline (lower `enforce_admins`, re-pin a check to another app), unless `--allow-check-removal`. |
+| [`scripts/standardize.sh`](scripts/standardize.sh) | Apply uniform branch protection to every managed repo. `allow_auto_merge` and required status checks are per-repo; zero-check repos (`acdp-ci`, `.github`) get protection only (with `enforce_admins:true`), never auto-merge; repos with required checks get `enforce_admins:false`. Required checks come from `checks_for()` — except `acdp-registry-rs`, whose checks and `enforce_admins` come from **its own** `.github/required-checks.json`. `--check` (alias `--dry-run`) is a read-only drift survey that mutates nothing. Exit **0** = clean; **1** = a result (drift, a declared check not yet applied, an `UNREGISTERED` org repo, an unreadable repo, or a named unmanaged repo); **2** = the check could not run (bad flags, missing dependency, config error, every repo unreadable). Fail-closed on apply: refuses to remove a live required check it doesn't declare, or to weaken a registry baseline (lower `enforce_admins`, re-pin a check to another app), unless `--allow-check-removal`. |
 | [`scripts/handoff/`](scripts/handoff/README.md) | Human-run, dry-run-by-default scripts for steps an agent shouldn't execute (e.g. moving the `v1` tag). |
 
 | This repo's own workflow (not consumable via `uses:`) | Purpose |
@@ -77,7 +78,7 @@ patch/minor — e.g. for crypto-critical dependencies:
 ```
 
 `exclude-groups` is a convenience only: an ungrouped PR has no group, so list crypto-critical
-dependencies in `exclude-dependencies`. `#` comments and blank lines in a pattern list are ignored.
+dependencies in `exclude-dependencies`. `#` comments, blank lines and CR/CRLF in a pattern list are handled (CR is a line break).
 
 Empty (the default) is exactly the policy above. A deny-list hold also **disarms**
 auto-merge if it was already armed — including one a human armed by hand — whenever

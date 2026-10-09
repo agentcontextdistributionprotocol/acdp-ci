@@ -1,7 +1,7 @@
 # `npm-relock`
 
 Composite action used by [`bump-consume.yml`](../../.github/workflows/bump-consume.yml)
-for the `npm` ecosystem. After the bump rewrote `package.json` to `PKG@T`, it relocks and
+for the `npm` ecosystem. After the bump rewrote `package.json` to `^T` (target `PKG@T`), it relocks and
 **fails closed** if the resulting `package-lock.json` is not installable. The logic is
 [`relock.sh`](relock.sh); it is exercised offline by
 [`tests/bump-npm`](../../tests/bump-npm/run.sh).
@@ -17,7 +17,8 @@ fails `npm ci` in the consumer (acdp-ci#28). This action waits for them and veri
 
 ```mermaid
 flowchart TD
-  S["start: back up package-lock.json"] --> L["list optionalDependencies of PKG@T<br/>(npm view)"]
+  N{"package-lock.json exists?"} -- no --> F0["exit 1 immediately<br/>(nothing to restore)"]
+  N -- yes --> S["back up package-lock.json"] --> L["list optionalDependencies of PKG@T<br/>(npm view)"]
   L -- "read error" --> R
   L --> W{"every optional dep<br/>served by the registry?"}
   W -- no --> R
