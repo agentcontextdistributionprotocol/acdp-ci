@@ -165,6 +165,7 @@ sequenceDiagram
     B-->>D: no-op, PR already open
   else new bump
     B->>R: poll until the target is served (24 x 5 s)
+    Note over B: timeout means the job fails and no PR opens
     alt ecosystem npm
       B->>C: rewrite dependency and any npm alias
       B->>R: npm-relock waits for every optional platform package

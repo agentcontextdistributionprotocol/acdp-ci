@@ -93,7 +93,7 @@ Each case directory holds, per repo involved:
   same endpoint the CI-6 guards in `auto-merge.yml`/`bump-consume.yml`
   already use).
 
-The registry cases additionally carry the two payloads only that repo needs:
+The registry cases additionally carry payloads only that repo needs (`registry-rs-insync` has both; `registry-rs-drift` only the first):
 `..._branches_main_protection.json` (the `branches/{b}/protection` read behind the
 weakening guard — the one place `standardize.sh` reads that endpoint) and
 `..._contents_.github_required-checks.json.json` (its committed baseline file,
