@@ -117,7 +117,7 @@ if os.environ.get("DOCS_CHECK_MERMAID")=="1" and shutil.which("npx"):
         r=subprocess.run(['npx','-y','@mermaid-js/mermaid-cli','-i',src,'-o',os.path.join(td,'o.svg'),'-q'],capture_output=True,text=True)
         if r.returncode!=0: fail(f'{f}: mermaid block #{i+1} does not parse: {r.stderr.strip()[:200]}')
 else:
-    skipped.append(f'mermaid: npx unavailable, {len(blocks)} block(s) not parsed')
+    skipped.append(f'mermaid: {len(blocks)} block(s) not parsed (set DOCS_CHECK_MERMAID=1; needs npx + network)')
 
 print(f'links checked: {checked}; mermaid blocks: {len(blocks)}')
 for s in skipped: print('SKIPPED:',s)

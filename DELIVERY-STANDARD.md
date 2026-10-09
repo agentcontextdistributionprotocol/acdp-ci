@@ -128,7 +128,7 @@ Leaves — no SDK dependency, so no `bump-acdp`:
 
 `acdp-ui-console` is *not* in this list either — it is a **fourth consumer**, the
 second npm one: `package.json` depends on `@agentcontextdistributionprotocol/acdp-wasm`
-and its `bump-acdp.yml` receives the wasm dispatch (see the known-gap section above).
+and its `bump-acdp.yml` receives the wasm dispatch (see the "Former gaps" paragraph above).
 Two things differ from the others: the package and tag namespace are `acdp-wasm` /
 `acdp-wasm-v*`, and its 0.x minors are held from Dependabot (`acdp-ui-console#136`) and
 from unattended merge here (`bump-consume.yml` treats a `0.x` minor as breaking, so only
@@ -685,17 +685,17 @@ automatic, audit-logged bypass; rollback is one DELETE.
 
 | Repo | Lang | CI caller | auto-merge | Dependabot | bump-acdp | Publish | Graph role |
 |---|---|---|---|---|---|---|---|
-| acdp-rs | Rust | own ci | own gate (`dependabot-auto-merge.yml`, crypto lockfile gate — not the shared `auto-merge.yml`; acdp-rs#351) | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / all four lanes dispatch — see propagation graph** |
+| acdp-rs | Rust | own ci | **excluded from `standardize.sh`** (self-governed protection) · own gate (`dependabot-auto-merge.yml`, crypto lockfile gate — not the shared `auto-merge.yml`; acdp-rs#351) | ✅ (SHA-pinned) | — | crate+npm+py+wasm | **hub / all four lanes dispatch — see propagation graph** |
 | acdp-registry-rs | Rust | own ci | ✅ | cargo+ga | cargo | Docker + crate | consumes crate |
 | acdp-control-plane | npm | own ci | ✅ | npm+docker+ga | npm | Docker | consumes npm |
 | acdp-playground | Python/uv | own ci | ✅ | uv+ga | uv | Docker | consumes py |
 | acdp-verifier-py | Python | own ci | ✅ | pip+ga | — | — | independent |
 | acdp-ui-console | TS | own ci | ✅ | npm+ga | npm | Vercel | consumes wasm (`acdp-wasm`) via dispatch → `bump-acdp.yml` |
 | acdp-website | MDX | own ci | n/a — excluded from `standardize.sh` (private repo; protection API 403s) | npm+ga | — | Vercel | leaf |
-| agentcontextdistributionprotocol (the spec) | schemas / RFCs | own | ✅ (`auto-merge.yml@v1`), managed by `standardize.sh` | — | — | — | **spec source**; notifies `acdp-rs`, `acdp-verifier-py`, `acdp-registry-rs` via `notify-spec-consumers.yml` |
-| acdp-docs | KB + MCP server | — | n/a — excluded from `standardize.sh` (private; no managed checks) | — | — | — | knowledge base; links to this repo, not a pipeline participant |
+| agentcontextdistributionprotocol (the spec) | schemas / RFCs | own | ✅ (`auto-merge.yml@v1`), managed by `standardize.sh` | pip+ga | — | — | **spec source**; notifies `acdp-rs`, `acdp-verifier-py`, `acdp-registry-rs` via `notify-spec-consumers.yml` |
+| acdp-docs | KB + MCP server | own `ci.yml` | n/a — excluded from `standardize.sh` (private; no managed checks) | — | — | — | knowledge base; links to this repo, not a pipeline participant |
 | acdp-ci | YAML/bash | n/a — also has `drift-check.yml` (`schedule`/`workflow_dispatch`) as of CI-8, but zero check-runs on its own PRs still holds | ❌ (protection-only, see `standardize.sh`) | ga (2 dirs: root + `actions/checkout-spec`) | — | — | **infra — this is the hub; every repo above consumes it at `@v1`** |
-| `.github` | — | n/a — only its own `posture-drift.yml` | ❌ (protection-only, see `standardize.sh`) | — | — | — | org profile + community health files |
+| `.github` | — | n/a — only its own `posture-drift.yml` | ❌ (protection-only, see `standardize.sh`) | ga | — | — | org profile + community health files |
 
 ## Extending to new SDKs (Java / Go / Kotlin)
 
