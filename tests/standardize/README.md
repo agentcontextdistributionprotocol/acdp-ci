@@ -91,8 +91,13 @@ Each case directory holds, per repo involved:
 - `repos_<org>_<repo>_branches_main.json` — a branch-summary payload (the
   shape returned by `GET /repos/{owner}/{repo}/branches/{branch}`, i.e. the
   same endpoint the CI-6 guards in `auto-merge.yml`/`bump-consume.yml`
-  already use — *not* the separate `.../branches/{branch}/protection`
-  endpoint).
+  already use).
+
+The registry cases additionally carry the two payloads only that repo needs:
+`..._branches_main_protection.json` (the `branches/{b}/protection` read behind the
+weakening guard — the one place `standardize.sh` reads that endpoint) and
+`..._contents_.github_required-checks.json.json` (its committed baseline file,
+served raw).
 
 **Provenance.** The branch-summary shapes (both the unprotected form and the
 protected form with `enforcement_level`/`checks[].app_id`) were captured live
@@ -102,21 +107,32 @@ combine that same real shape with the declared-check names taken verbatim
 from `checks_for()` in `scripts/standardize.sh`. No fixture contains a
 credential, token, or private-repo payload.
 
-### The 11 cases
+### The 11 committed fixture cases
 
 | Case | Purpose |
 |---|---|
-| `registry-rs-drift` | `acdp-registry-rs` live has 4 contexts (`rustfmt`, `clippy`, `tests`, `conformance (spec fixtures)`); `checks_for()` only declares the first 3 — the real drift this whole wave exists to fix. |
-| `registry-rs-insync` | Same live fixture, reused once `checks_for()` matches live — the "no drift" case. |
+| `registry-rs-drift` | `acdp-registry-rs` live with 4 contexts (`rustfmt`, `clippy`, `tests`, `conformance (spec fixtures)`) — the original defect's shape (a live check the old hand-maintained table did not declare). Now only used by the fixture-serving assertions (the stub serves it read-only); the registry's declared checks come from its baseline file, not `checks_for()`. |
+| `registry-rs-insync` | The canonical in-sync registry fixture: 11 live contexts, the branch-protection payload, and the committed baseline file. Reused as the base for most scratch fixtures the baseline/weakening tests build. |
 | `control-plane-reorder` | `acdp-control-plane`'s same 3 declared checks, in a shuffled live order — the false-positive trap; order must never read as drift. |
-| `playground-exact` | `acdp-playground`'s live branch has 2 contexts; `checks_for()` now declares 3 (`docker image builds` was added in Phase 2) — a missing-declared-check-never-blocks case, not an exact match. |
-| `unprotected` | `acdp-ci`, currently unprotected (`protected:false`) — the normal first-apply case. |
+| `playground-exact` | `acdp-playground`'s live branch has 2 contexts while `checks_for()` declares 3 — a declared-but-not-live check (pending-apply) never blocks. |
+| `unprotected` | `acdp-ci` unprotected (`protected:false`) — the normal first-apply case. |
 | `protected-no-rsc` | `protected:true` with no `required_status_checks` key at all — a permission-degraded-looking read. |
 | `contexts-null` | `required_status_checks.contexts` is `null`. |
 | `contexts-not-array` | `required_status_checks.contexts` is a string, not an array. |
 | `invalid-json` | The branch fixture file is not valid JSON (`{oops`). |
 | `api-failure` | The branch fixture file is absent entirely (repo fixture still present) — simulates a failed `gh api` call. |
 | `unmanaged` | `acdp-rs`: `checks_for()` returns 1 (not in the managed set) — `standardize.sh` skips it before making any `gh` call at all. |
+
+### Scratch fixtures (most of the assertions)
+
+Most assertions do not use the committed cases above: `run.sh` builds throwaway fixtures
+(`mktemp -d`, helpers such as `write_insync_fixture`, `write_org_listing`,
+`write_registry_baseline`) so each test can vary exactly one thing. The sections of `run.sh`
+(search for its `echo "== …"` banners) are: fixture-serving, full-script cases, `checks_for()`
+corrections and the drift guard, pending-apply reporting (`G*`), stub honesty / `enforce_admins`
+bodies / `acdp-rs` never touched (`#22`/`#30`), the UNREGISTERED org-listing sweep (`B*`), and the
+registry baseline file and weakening guard (`#33`). Test IDs (`B2`, `G4b`, …) are stable labels
+that `mutants.sh` names in its declared killer sets.
 
 `acdp-ci` and `.github` are protection-only in `checks_for()` (zero declared
 checks); `unprotected` fixtures them using `acdp-ci`.
@@ -162,40 +178,40 @@ assertions would *notice* if `standardize.sh` stopped behaving correctly. A
 test that passes with the bug injected is worth nothing, and from the outside
 it is indistinguishable from one that works — green either way.
 
-`./tests/standardize/mutants.sh` injects thirty-two known bugs and requires the
+`./tests/standardize/mutants.sh` injects the known bugs listed below (thirty-two as of 2026-10-09; the run prints the live count) and requires the
 suite to fail on each (killer sets for all but the original four were *measured*, not guessed):
 
 | mutant | assertions that catch it |
 |---|---|
-| drift detection disabled (`extras` always empty) | 6 |
-| fail-closed jq replaced by the B4 `// []` defaulting | 5 |
+| drift detection disabled (extras always empty) | 6 |
+| fail-closed jq replaced by the B4 // [] defaulting | 5 |
 | wholly-failed survey downgraded from fatal (2) to finding (1) | 3 |
-| partial failure over-escalated to fatal | 2 |
-| `checks_for` tri-state: unmanaged collapsed into protection-only | 7 |
-| `--check`/`--allow-check-removal` exclusion removed | 2 |
-| exclusion downgraded from exit 2 to exit 1 | 1 |
+| partial failure over-escalated to fatal (any unreadable, not all) | 2 |
+| checks_for tri-state: unmanaged collapsed into protection-only | 7 |
+| mutual exclusion removed (--check honours --allow-check-removal) | 2 |
+| mutual exclusion downgraded from exit 2 to exit 1 | 1 |
 | G4: explicitly-named unmanaged repo no longer an error | 3 |
-| G4: `EXPLICIT_REPOS` lost after `--` | 3 |
-| protection-only `enforce_admins` true → false | 1 |
-| has-checks default `enforce_admins` false → true | 1 |
-| registry `enforce_admins` true → false | 2 |
+| G4: EXPLICIT_REPOS tracking lost after the -- terminator | 3 |
+| protection-only body: enforce_admins true -> false | 1 |
+| has-checks default: enforce_admins false -> true | 1 |
+| registry enforce_admins ignores the baseline (hardcoded false) | 2 |
 | protection PUT attempted before the settings PATCH | 3 |
-| registry checks no longer pinned to an `app_id` | 5 |
-| UNREGISTERED: flag never accumulated | 2 |
-| UNREGISTERED: exclusion subtraction removed | 4 |
-| UNREGISTERED: unreadable listing no longer an error (fail-open) | 2 |
+| registry app_id pinning dropped (checks -> contexts) | 5 |
+| UNREGISTERED: repo found but flag never accumulated | 2 |
+| UNREGISTERED: exclusion subtraction removed (excluded repos reported) | 5 |
+| UNREGISTERED: unreadable org listing no longer an error (fail-open) | 2 |
 | UNREGISTERED: escalated to fatal exit 2 | 2 |
 | UNREGISTERED: org enumerated even when repos are named | 6 |
 | UNREGISTERED: accounted-for-repo sanity check removed | 2 |
-| baseline: empty `required` accepted | 1 |
-| baseline: status 3 (remote baseline) treated as protection-only | 46 |
-| baseline: `app_id` validation removed (any value accepted) | 6 |
-| baseline: unreadable baseline not an error in `--check` | 1 |
+| baseline: empty required accepted (would wipe every check) | 1 |
+| baseline: status 3 (remote baseline) treated as protection-only (0) | 46 |
+| baseline: app_id validation removed (any value accepted) | 6 |
+| baseline: unreadable baseline not an error in --check | 1 |
 | baseline: apply carries on silently when the baseline is unreadable | 23 |
-| baseline: `strict` hardcoded true | 1 |
+| baseline: strict hardcoded true | 1 |
 | baseline: raw media type not requested | 24 |
 | baseline: control characters in a context accepted | 1 |
-| baseline: `app_id` -1 / 0 accepted (positive check removed) | 3 |
+| baseline: app_id -1 / 0 accepted (positive check removed) | 3 |
 | weakening guard: enforce_admins lowering not detected | 2 |
 | weakening guard: app_id re-pin not detected | 1 |
 | weakening guard: unreadable protection read not fatal | 1 |
@@ -204,11 +220,7 @@ suite to fail on each (killer sets for all but the original four were *measured*
 empty list would mean "protection-only" and `required_status_checks:null` would
 wipe every registry check. It is a hazard guard, not a precision mutant.)
 
-**Honest coverage:** 82 distinct assertions of 149 are mutation-measured
-(acdp-ci#22 asked for the guards with zero coverage, not one mutant per
-assertion — all five it listed are now covered; one mutant per guard variant,
-not the plan's two for `enforce_admins`-registry and `app_id`). The rest are unmeasured, not
-known-good.
+**Honest coverage:** only the assertions named in the table above are mutation-measured (acdp-ci#22 asked for the guards with zero coverage, not one mutant per assertion); every other assertion is unmeasured, not known-good. The per-mutant counts are as of 2026-10-09 and are re-measured on every run — the declared killer set must match exactly, so a stale count fails `mutants.sh` rather than rotting silently.
 
 **The stub must log before it can refuse.** `bin/gh` used to exit on an unset
 `$FIXTURES` *before* logging, which made every "makes zero gh calls at all"
@@ -263,6 +275,8 @@ next branch still rejects the same fixture (`null|type` is `"null"`, not
 to pass. That mistake initially reported 22 kills instead of the true 5,
 because the crude splice broke jq outright — a trivially-caught mutant wearing
 the costume of a subtle one.
+
+Requires `python3` and `jq` (a missing one exits 2 as a broken environment, not a result).
 
 Not wired into CI: this repo produces no check-runs on its own PRs, and the
 harness rewrites `scripts/standardize.sh` in place (restored via `trap`, and

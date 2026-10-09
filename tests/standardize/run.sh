@@ -79,7 +79,7 @@ echo
 
 echo "== fixture-serving cases =="
 
-# --- 1. registry-rs-drift: live has the 4th check the table doesn't declare ---
+# --- 1. registry-rs-drift: 4 live contexts incl. the one the old table dropped (fixture-serving only) ---
 FX="$FIXTURES_ROOT/registry-rs-drift"
 LOG="$(new_log)"
 out="$(FIXTURES="$FX" GH_LOG="$LOG" gh api "repos/$ORG/acdp-registry-rs" --jq .default_branch)"
@@ -90,7 +90,7 @@ has="$(FIXTURES="$FX" GH_LOG="$LOG" gh api "repos/$ORG/acdp-registry-rs/branches
 [ "$has" = "true" ] && pass "registry-rs-drift: live includes conformance check" || fail "registry-rs-drift: live includes conformance check" "got '$has'"
 assert_zero_mutations "$LOG" "registry-rs-drift: fixture-serving is read-only"
 
-# --- 2. registry-rs-insync: same fixture, reserved for Phase 2's post-fix assertion ---
+# --- 2. registry-rs-insync: the canonical in-sync registry fixture (11 live contexts) ---
 FX="$FIXTURES_ROOT/registry-rs-insync"
 LOG="$(new_log)"
 n="$(FIXTURES="$FX" GH_LOG="$LOG" gh api "repos/$ORG/acdp-registry-rs/branches/main" --jq '.protection.required_status_checks.contexts | length')"
