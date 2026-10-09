@@ -1,5 +1,7 @@
 # Cross-repo note: the push-only release-dispatch gate in acdp-rs is already tracked
 
+> **Status (2026-10-09): resolved.** `acdp-rs#302` and `#304` are both CLOSED (fixed 2026-09-25); the text below is the historical reading of the gap and describes them as open because it was written before the fix.
+
 **Owning repo:** `agentcontextdistributionprotocol/acdp-rs` (this note is written and
 tracked in `acdp-ci`, per that repo's cross-repo convention — see
 `acdp-ci/DELIVERY-STANDARD.md`'s propagation-graph section for the doc-side context, and

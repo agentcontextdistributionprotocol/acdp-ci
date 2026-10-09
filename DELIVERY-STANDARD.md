@@ -22,155 +22,109 @@ registry credential:
 The invariant a consumer bump relies on, for the npm and PyPI **binding**
 packages: **a consumer bump requires a published artifact carrying a
 verifiable provenance attestation binding it to a commit, plus a release tag
-at that commit.** The attestation, not a `gitHead` field in the published
-manifest, is the actual proof — `gitHead` is self-asserted metadata the
-publish tooling writes, not something an outside party can verify. A reader
-verifies an artifact with `gh attestation verify <file> --repo
-<owner>/acdp-rs`.
+at that commit.** The attestation — not a `gitHead` field in the published
+manifest, which is self-asserted — is the proof. How to verify it, per
+registry, is owned by `acdp-rs`:
+[supply-chain: verifying a released artifact](https://github.com/agentcontextdistributionprotocol/acdp-rs/blob/main/docs/supply-chain.md#1-verifying-a-released-artifact-came-from-this-repo).
 
-**Exception: the `acdp` crate has no attestation mechanism today.**
-`release-plz.yml:16-24` (in `acdp-rs`) states plainly that `cargo publish`
-"has no build-provenance / attestation mechanism comparable to npm
-`--provenance` or PyPI attestations", with crates.io Trusted Publishing
-tracked as the follow-up that would close this gap. `acdp` is a real
-consumer-bump path — `acdp-registry-rs` bumps it via `bump-consume.yml@v1`
-with `ecosystem: cargo` — so a cargo consumer bump is anchored by the
-release-plz tag alone, not by an attestation.
+**Exception: the `acdp` crate has no attestation mechanism.** `cargo publish`
+has no build-provenance equivalent of npm `--provenance` or PyPI attestations
+(see [supply-chain: crates.io](https://github.com/agentcontextdistributionprotocol/acdp-rs/blob/main/docs/supply-chain.md#cratesio-acdp-and-the-workspace-crates)).
+`acdp` is still a real consumer-bump path — `acdp-registry-rs` bumps it via
+`bump-consume.yml@v1` with `ecosystem: cargo` — so a cargo bump is anchored by the
+release-plz tag alone.
 
-All three of `acdp-rs`'s binding-release workflows — `bindings-release.yml`
-(npm), `acdp-py-release.yml` (PyPI wheels), and `acdp-wasm-release.yml`
-(npm) — also accept `workflow_dispatch` for manual/dry-run use, alongside
-their normal tag trigger, and all three push a real release tag when a
-dispatch actually publishes — none of them leaves an untagged publish
-behind. Concretely, each declares a tag-push step gated on
-`github.event_name == 'workflow_dispatch' && !inputs.dry_run` that runs `git
-push origin` with the package's tag prefix:
-`bindings-release.yml:211`/`:223` (`acdp-node-v*`),
-`acdp-py-release.yml:210`/`:222` (`acdp-py-v*`), and
-`acdp-wasm-release.yml:132`/`:144` (`acdp-wasm-v*`). Each also mints a
-verifiable provenance attestation for its artifact before publishing: the two
-npm workflows run `actions/attest-build-provenance@v4` under job permissions
-`id-token: write` plus `attestations: write`
-(`bindings-release.yml:46-47`/`:110`, `acdp-wasm-release.yml:51-52`/`:111`)
-and publish with `npm publish --provenance`; `acdp-py-release.yml` runs the
-same `attest-build-provenance@v4` step per-artifact under the equivalent
-permissions (`:50-51`/`:91` for wheels, `:105-106`/`:121` for the sdist) and
-its separate `publish` job uploads PEP 740 attestations to PyPI via
-`pypa/gh-action-pypi-publish` (`attestations: true`, OIDC `id-token: write`
-at `:165`). So every real **binding** publish — tag-triggered or dispatched —
-carries a verifiable provenance attestation as well as a tag; the `acdp`
-crate publish is the one exception, above.
+The three binding-release workflows also accept `workflow_dispatch`, and a
+non-dry-run dispatch pushes a real tag and publishes with an attestation, exactly
+like a tag push; a `dry_run: true` dispatch produces neither and is never a
+release. What triggers each release, and how a tag/dispatch maps to a publish, is in the
+[release runbook](https://github.com/agentcontextdistributionprotocol/acdp-rs/blob/main/docs/release-runbook.md#how-releases-are-triggered).
 
-**Limit: these builds are not bit-reproducible**, so the guarantee above rests
-on the attestation, not on independent rebuilding. `acdp-wasm-release.yml`
-installs `wasm-pack` unpinned via `taiki-e/install-action`; from identical
-Rust source, v0.8.3 and v0.8.5 produced wasm binaries with a 484-byte delta
-(tracked as `acdp-rs#196`, open). A consumer therefore verifies a bump by
-**checking the attestation**, not by rebuilding and diffing artifacts — the
-trust root is the attested GitHub Actions builder identity (the workflow,
-repo, and commit the attestation is signed over), not bit-for-bit
-reproducibility.
+**Limit: builds are not guaranteed bit-reproducible**, so the guarantee rests on
+the attestation, not on independent rebuilding; the trust root is the attested
+GitHub Actions builder identity. The `acdp-wasm` artifact is covered by a determinism
+gate described in the runbook's
+[reproducibility section](https://github.com/agentcontextdistributionprotocol/acdp-rs/blob/main/docs/release-runbook.md#reproducibility-of-the-acdp-wasm-artifact)
+(the earlier "wasm-pack unpinned" concern, `acdp-rs#196`, is closed).
 
-`bump-consume.yml` (in this repo) only *propagates* whatever a registry
-actually serves — it has no way to independently confirm the attestation on
-a consumer's behalf. For the npm and PyPI **binding** packages, what
-actually distinguishes a trustworthy release from one that isn't is the
-presence of a valid provenance attestation binding the published artifact to
-a commit, plus a tag at that commit — not which trigger (`push` vs.
-`workflow_dispatch`) produced it, since a non-dry-run dispatch of those three
-binding-release workflows produces both. A `dry_run: true` dispatch of those
-workflows is the one case that produces neither a tag nor a publish, and
-should never be treated as a real release. The `acdp` crate is the exception
-already noted above: its `release-plz.yml` publish is push-triggered only
-(unlike the three binding-release workflows, it has no `workflow_dispatch` /
-dry-run mode) and carries no attestation, so a cargo consumer bump is
-anchored by the release-plz tag alone, not by an attestation.
+`bump-consume.yml` (this repo) only *propagates* whatever a registry serves — it
+cannot independently confirm an attestation on a consumer's behalf.
 
 ## Propagation graph
 
+```mermaid
+flowchart LR
+  subgraph rs["acdp-rs publishes (hub)"]
+    crate["crate — release-plz.yml"]
+    npm["npm bindings — bindings-release.yml"]
+    py["PyPI — acdp-py-release.yml"]
+    wasm["npm wasm — acdp-wasm-release.yml"]
+  end
+  crate -- "acdp-released" --> reg["acdp-registry-rs<br/>bump-acdp (cargo)"]
+  npm -- "acdp-released" --> cp["acdp-control-plane<br/>bump-acdp (npm)"]
+  py -- "acdp-released" --> pg["acdp-playground<br/>bump-acdp (uv)"]
+  wasm -- "acdp-released" --> ui["acdp-ui-console<br/>bump-acdp (npm, acdp-wasm)"]
+  reg & cp & pg & ui --> bc["bump-consume.yml@v1"]
+  bc --> pr["bot PR"]
+  dep["Dependabot monthly group<br/>(safety net — weak or absent, see below)"] -.-> pr
+  spec["spec repo<br/>notify-spec-consumers.yml"] -- "spec-released" --> bs["bump-spec (acdp-rs, verifier-py, registry-rs)"]
+  bs --> bsr["bump-spec-ref.yml@v1 — PR, never auto-merged"]
+  spec -. "not notified" .-> cpp["acdp-control-plane<br/>(pins the spec inline)"]
 ```
-                     ┌─ crate (release-plz) ─▶ dispatch  ▶ acdp-registry-rs   → cargo add acdp@X
-acdp-rs publishes ───┼─ npm   (bindings)     ─▶ dispatch  ▶ acdp-control-plane → npm re-lock
-                     ├─ py    (py-release)   ─▶ dispatch  ▶ acdp-playground    → uv lock --upgrade
-                     └─ wasm  (wasm-release) ─▶ dispatch  ▶ acdp-ui-console    → npm re-lock (acdp-wasm)
-```
+
+`release-plz.yml` also dispatches the three binding workflows (`bindings-release`,
+`acdp-py-release`, `acdp-wasm-release`) via `workflow_dispatch` for a real release;
+see the runbook's
+[dispatch matrix](https://github.com/agentcontextdistributionprotocol/acdp-rs/blob/main/docs/release-runbook.md#release-dispatch-matrix).
 
 The wasm lane is the fourth consumer lane: it publishes the *distinct* package
 `@agentcontextdistributionprotocol/acdp-wasm` (tag namespace `acdp-wasm-v*`), not
-`@agentcontextdistributionprotocol/acdp`, but `bump-consume.yml` is already generic over
+`@agentcontextdistributionprotocol/acdp`, but `bump-consume.yml` is generic over
 `package`, so `acdp-ui-console`'s `bump-acdp.yml` calls it unchanged with
 `ecosystem: npm` and that package name.
 
 Each publish job fires `repository_dispatch: acdp-released` (payload
-`{version, ecosystem}`) at its consumer(s) using an `acdp-deps-bot` App token.
-The consumer's `bump-acdp.yml` calls `bump-consume.yml`. Dependabot's monthly
-`acdp` group is the intended safety net if a dispatch is ever missed, but its actual
-strength differs per consumer. `acdp-registry-rs`'s cargo update-type catch-all groups
-(no `ignore` blocks `acdp`) cover it cleanly. `acdp-control-plane`'s dedicated
-`acdp-sdk` group also currently matches (its own `.github/dependabot.yml` comment notes
-the pattern must be the literal scoped `package.json` key, and a prior short-name
-pattern silently stopped matching after a rename) — but that same comment says
-"Dependabot itself rarely proposes updates for this dep" regardless of grouping, and in
-practice `acdp-control-plane` sat stale for months despite the group (see the known-gap
-paragraph below), so treat this as a weak, unproven net rather than a guaranteed one.
-`acdp-ui-console`'s net is its npm group: patches flow, `acdp-wasm` 0.x minors are
-ignored by Dependabot on purpose (`acdp-ui-console#136`), so a minor bump only arrives
-through the dispatch-driven PR. `acdp-playground` has no net at all, by explicit design: `.github/dependabot.yml`
-`ignore`s the `acdp` dependency by name outright (bumping it is a semantic surface
-change, not a mechanical one).
+`{version, ecosystem}`, with `ecosystem` the bump-consume value — `cargo`, `npm`,
+`uv`) at its consumer using an `acdp-deps-bot` App token. The consumer's
+`bump-acdp.yml` calls `bump-consume.yml`.
 
-**Former gap, closed 2026-09-25 (`acdp-rs#302` / `#304`):** `acdp-rs`'s standard release
-path, `.github/workflows/release-plz.yml:129-138`, fires `bindings-release.yml` and
-`acdp-py-release.yml` via `workflow_dispatch` (`-f dry_run=false`) for **every** real
-release — not as an edge case, that's how releases normally happen. Both workflows used to gate
-their `repository_dispatch: acdp-released` step on `if: ${{ github.event_name ==
-'push' }}` alone (the token-mint and dispatch steps in `acdp-py-release.yml` and
-`bindings-release.yml`; line numbers omitted — they drifted once the fix landed), so the notification
-was skipped by construction on every release-plz-driven release. Combined with
-`acdp-playground`'s missing Dependabot fallback above, this is what let its `acdp` pin
-fall six minor versions behind (0.8.3 → 0.14.1, all eight releases since 0.10.0 missed)
-before anyone noticed by hand. `acdp-control-plane` sat pinned at `^0.8.5` against npm's
-`0.14.1` for the same dispatch gate, despite having a Dependabot group that in principle
-covers `acdp` — direct evidence for that group's own "rarely proposes updates for this
-dep" caveat above; its own safety net did not, in fact, save it. Both halves were
-independently filed and are now **closed** (both 2026-09-25):
-[acdp-rs#302](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/302)
-(npm/`bindings-release.yml`) and
-[acdp-rs#304](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/304)
-(PyPI/`acdp-py-release.yml`); both dispatch steps now gate on
-`push || !inputs.dry_run`. Verified live (2026-10-05): the consumers' `bump acdp`
-workflows ran on `repository_dispatch` on 2026-09-25 and 2026-10-03/04
-(`acdp-control-plane`, `acdp-playground`). See
-`plans/cross-repo/acdp-rs-release-dispatch-gap.md` for how the gap was read and one gap
-in `#304`'s own suggested fix that this repo found while cross-checking it.
-`acdp-playground` still has no Dependabot net by design (above).
+**Dependabot as a safety net is uneven** (each consumer owns its own
+`.github/dependabot.yml`; read those, not a copy here):
+[`acdp-registry-rs`](https://github.com/agentcontextdistributionprotocol/acdp-registry-rs/blob/main/.github/dependabot.yml)
+covers `acdp` through its cargo catch-all groups;
+[`acdp-control-plane`](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/blob/main/.github/dependabot.yml)
+has a dedicated `acdp-sdk` group whose own comment says Dependabot rarely proposes the
+dep — a weak, unproven net;
+[`acdp-ui-console`](https://github.com/agentcontextdistributionprotocol/acdp-ui-console/blob/main/.github/dependabot.yml)
+ignores `acdp-wasm` 0.x minors on purpose (`acdp-ui-console#136`), so a minor only arrives
+through the dispatch; and
+[`acdp-playground`](https://github.com/agentcontextdistributionprotocol/acdp-playground/blob/main/.github/dependabot.yml)
+`ignore`s `acdp` by name, by design — it has **no** net.
 
-**A fourth, differently-shaped gap, closed:**
-`acdp-wasm-release.yml` (npm, `acdp-ui-console`) never had a `#302`/`#304`-style gating
-bug — until [acdp-rs#307](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/307)
-it had no `repository_dispatch: acdp-released` step at all. `acdp-rs#308` (merged
-2026-09-27) added one, correctly: it gates on `if: ${{ always() && steps.publish.outcome
-== 'success' && (github.event_name == 'push' || !inputs.dry_run) }}` — so, unlike the earlier
-push-only gap, it fires on both a tag push *and* a non-dry-run `workflow_dispatch`, and it
-derives `VER` from `inputs.version` with a semver guard exactly the way
-`plans/cross-repo/acdp-rs-release-dispatch-gap.md` describes `#302`'s linked plan doing
-for `bindings-release.yml`. The receiver side landed the same day:
-[acdp-ui-console#107](https://github.com/agentcontextdistributionprotocol/acdp-ui-console/pull/107)
-(merged 2026-09-27) added `bump-acdp.yml` (`on: repository_dispatch: [acdp-released]` +
-`workflow_dispatch`, calling `bump-consume.yml@v1` with
-`package: '@agentcontextdistributionprotocol/acdp-wasm'`), the "yes" decision recorded in
-[acdp-ui-console#70](https://github.com/agentcontextdistributionprotocol/acdp-ui-console/issues/70#issuecomment-5835639012).
-Verified live (2026-10-05): dispatches on 2026-10-03 and 2026-10-04 each triggered that
-workflow and opened a bump PR (`acdp-ui-console#156`, `#160`). Whether those PRs merge is
-that repo's CI business, not a propagation gap. The follow-up this section used to
-promise is [acdp-ci#26](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/26).
+**Former gaps, all closed (2026-09-25 → 09-27).** Two of `acdp-rs`'s publish workflows
+(`bindings-release`, `acdp-py-release`) used to gate their `acdp-released` dispatch on
+`push` alone, so every `release-plz`-driven release (which uses `workflow_dispatch`) skipped
+the notification; `acdp-playground` and `acdp-control-plane` fell many minor versions behind
+before anyone noticed
+([acdp-rs#302](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/302),
+[#304](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/304) — closed; both
+now gate on `push || !inputs.dry_run`). The wasm lane had no dispatch step at all until
+[acdp-rs#307](https://github.com/agentcontextdistributionprotocol/acdp-rs/issues/307) /
+`#308`, and `acdp-ui-console` gained its `bump-acdp.yml` in
+[acdp-ui-console#107](https://github.com/agentcontextdistributionprotocol/acdp-ui-console/pull/107).
+Verified live 2026-10-05: dispatches on 2026-09-25 and 2026-10-03/04 each triggered the
+consumers' `bump acdp` workflows. How the gap was read is in
+`plans/cross-repo/acdp-rs-release-dispatch-gap.md`.
 
-Leaves — standardized (CI + auto-merge + Dependabot) but no SDK dependency, so
-no `bump-acdp`:
+Leaves — no SDK dependency, so no `bump-acdp`:
 
 - **acdp-verifier-py** — independent second implementation of the verification
-  core (for spec Final promotion). Its independence from `acdp-rs` is the point.
-- **acdp-website** — Vercel deploy, no family SDK dependency.
+  core (for spec Final promotion); standardized (CI + auto-merge + Dependabot). Its
+  independence from `acdp-rs` is the point — see its
+  [independence claim](https://github.com/agentcontextdistributionprotocol/acdp-verifier-py/blob/main/README.md#independence-claim).
+- **acdp-website** — Vercel deploy, no family SDK dependency. **Not** managed by
+  `standardize.sh`: it is a private repo where branch protection and rulesets both
+  403 (an explicit `EXCLUDED_REPOS` entry), so it carries no required checks from here.
 
 `acdp-ui-console` is *not* in this list either — it is a **fourth consumer**, the
 second npm one: `package.json` depends on `@agentcontextdistributionprotocol/acdp-wasm`
@@ -192,29 +146,52 @@ not repeated here.
    `acdp-py-release` PyPI tag / `acdp-wasm-release` npm tag). Each publish job, on a
    real publish, mints an App token scoped to the consumer and POSTs
    `repository_dispatch: acdp-released` with `client_payload {version, ecosystem}`.
-   - crate → `acdp-registry-rs` (detected from release-plz's `releases` output;
-     other workspace crates are ignored)
-   - npm → `acdp-control-plane` (version from the `acdp-node-v*` tag)
-   - PyPI → `acdp-playground` (version from the `acdp-py-v*` tag)
-   - npm (wasm) → `acdp-ui-console` (version from the `acdp-wasm-v*` tag; package
-     `@agentcontextdistributionprotocol/acdp-wasm`, a distinct npm package from the
-     `acdp` one `acdp-control-plane` consumes) — fires correctly as of
-     `acdp-rs#307`/`#308` and is consumed by `acdp-ui-console/bump-acdp.yml`.
-2. The consumer's thin `bump-acdp.yml` calls `bump-consume.yml@v1`, which:
-   resolves the target, **waits for the registry to actually serve it** (npm CDN
-   / crates.io index / PyPI can lag a publish), bumps the manifest + lockfile for
-   the ecosystem (`npm` rewrites the dep and any `npm:` alias, then runs the
-   `actions/npm-relock` composite action: it waits for **every** optional
-   platform package of the target, relocks, and verifies the lock contains them
-   and passes `npm ci --dry-run` — a release publishes the main package before
-   its platform packages, and an un-verified relock in that window silently
-   drops them (acdp-ci#28), so a bad lock now fails the bump job instead of
-   opening a red PR; the consumer's `.nvmrc` / `.node-version` picks the Node
-   version (the `node-version` input, default `22`, is the fallback) so the lock is
-   written by the same npm major as its CI; `cargo` edits the
-   version in place preserving `features`, virtual-workspace-safe, then
-   `cargo update --precise`; `uv` runs `uv lock --upgrade-package`), opens a PR,
-   and arms auto-merge **unless the bump is breaking** (major, or a `0.x` minor).
+   Which workflow notifies which consumer, and when it fires, is `acdp-rs`'s to document:
+   [release dispatch matrix](https://github.com/agentcontextdistributionprotocol/acdp-rs/blob/main/docs/release-runbook.md#release-dispatch-matrix).
+2. The consumer's thin `bump-acdp.yml` calls `bump-consume.yml@v1`:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant D as dispatch or manual run
+  participant B as bump-consume.yml
+  participant R as registry
+  participant C as consumer repo
+  D->>B: acdp-released {version, ecosystem}, or workflow_dispatch
+  B->>B: resolve target (event, else input, else latest)
+  alt already at target
+    B-->>D: no change
+  else branch deps/NAME-VER already exists
+    B-->>D: no-op, PR already open
+  else new bump
+    B->>R: poll until the target is served (24 x 5 s)
+    alt ecosystem npm
+      B->>C: rewrite dependency and any npm alias
+      B->>R: npm-relock waits for every optional platform package
+      B->>B: relock, verify lock and npm ci --dry-run (fail closed)
+    else ecosystem cargo
+      B->>C: edit Cargo.toml in place, cargo update --precise
+    else ecosystem uv
+      B->>C: uv lock --upgrade-package
+    end
+    B->>C: push branch, open PR
+    alt breaking bump (major, or 0.x minor) and not allow-major
+      B-->>C: PR left for a human
+    else base branch has no required checks
+      B-->>C: warn, auto-merge not armed
+    else
+      B->>C: arm auto-merge
+    end
+  end
+```
+
+   The npm path matters most: a release publishes the main package before its
+   platform packages, and an unverified relock in that window silently drops them
+   (acdp-ci#28), so a bad lock now fails the bump job instead of opening a red PR (see
+   [`actions/npm-relock`](actions/npm-relock/README.md)). The consumer's `.nvmrc` /
+   `.node-version` picks the Node version (the `node-version` input, default `22`, is the
+   fallback) so the lock is written by the same npm major as its CI. `cargo` preserves
+   `features` and is virtual-workspace-safe.
 3. Missed dispatch → Dependabot's monthly `acdp` group opens the same PR later
    (`acdp-playground` excepted — see the propagation-graph section above).
 
@@ -226,7 +203,7 @@ alias specifier (e.g. `"acdp": "npm:@agentcontextdistributionprotocol/acdp@^0.8.
 
 **Why (verified, not the originally-hypothesized reason)**: `bump-consume.yml`'s
 own npm rewrite loop already handles an aliased entry correctly — its `else if`
-branch (`bump-consume.yml:157`) matches `d[k].startsWith("npm:"+pkg+"@")`
+branch (the `npm:` alias branch of the rewrite loop) matches `d[k].startsWith("npm:"+pkg+"@")`
 against **every** key in the dependency section, not just `k===pkg`, so the fast
 dispatch path rewrites an alias's value regardless of what its own key is named.
 The actual risk is the *safety net*: Dependabot's monthly sweep — which exists
@@ -241,17 +218,15 @@ which is strictly cheaper than teaching Dependabot's alias handling (not
 `acdp-ci`'s to configure) or adding a second alias-resolution code path.
 
 A one-time, read-only sweep of every npm-consuming sibling repo
-(`acdp-ui-console`, `acdp-website`, `acdp-control-plane`) is recorded in
-`PROGRESS.md`'s "npm-alias sweep (Phase 2, CI-4)" section —
-`acdp-control-plane` had this violation as its sole declaration of the
+(`acdp-ui-console`, `acdp-website`, `acdp-control-plane`) was done during CI-4
+(Phase 2): `acdp-control-plane` had this violation as its sole declaration of the
 family SDK at sweep time, tracked via
 [acdp-control-plane#123](https://github.com/agentcontextdistributionprotocol/acdp-control-plane/issues/123)
 and `plans/cross-repo/acdp-control-plane-dealias-acdp.md`. As of 2026-09-05
 the alias has been removed and #123 is closed (see the CI baseline section
 below) — kept here as the historical sweep record, not a live violation.
 This rule is a standing statement of intent, not an enforced CI gate — nothing
-here catches a *new* alias added after this rule ships (see Long-term posture
-in the CI-4 plan).
+here catches a *new* alias added after this rule ships.
 
 ### Spec propagation (a new spec revision → its SHA-pinners)
 
@@ -266,12 +241,23 @@ directly with the inline pin shape (a raw `actions/checkout` step against
 the spec repo, with an explicit 40-hex `ref:`). Adoption of a new SHA is
 always a reviewed PR, never auto-merged (below).
 
-Snapshot, verified against each repo's `origin/main` (2026-09-24):
-`acdp-verifier-py` (`ci.yml:35`) and `acdp-registry-rs` (`ci.yml:580`, and also
-`mutants.yml:378` — adopted via PR #155) have both adopted the composite action.
-`acdp-rs` (`ci.yml:68-76`) still satisfies the pinning rule using the inline pin
-shape. All three repos pin at a 40-hex SHA today; only the mechanism differs, and
-this snapshot will drift as more repos migrate onto the composite action.
+Which repos pin the spec, and how, as of 2026-10-09 (each repo's `ci.yml`, and
+`mutants.yml` where present, is authoritative — read it rather than trusting this
+snapshot): `acdp-verifier-py` and `acdp-registry-rs` (both its `ci.yml` and
+`mutants.yml`) use the composite action; `acdp-rs` pins inline in `ci.yml` **and**
+`bindings.yml` (its own `bump-spec.yml` opens a companion PR for the second pin);
+`acdp-control-plane` pins inline in `ci.yml` and has **no** `bump-spec` caller. Every
+pin is a 40-hex SHA; only the mechanism differs.
+
+**Notification gap (a decision, not an accident):** the spec repo's
+[`notify-spec-consumers.yml`](https://github.com/agentcontextdistributionprotocol/agentcontextdistributionprotocol/blob/main/.github/workflows/notify-spec-consumers.yml)
+dispatches `spec-released` only to `acdp-rs`, `acdp-verifier-py` and `acdp-registry-rs`.
+`acdp-control-plane` pins the spec but is not notified, so its pin moves only when
+someone bumps it by hand (its `ci.yml` comment records the last bump). The spec's
+versioning and release rules are in
+[`VERSIONING.md`](https://github.com/agentcontextdistributionprotocol/agentcontextdistributionprotocol/blob/main/VERSIONING.md#release-tags) and
+[`RELEASE.md`](https://github.com/agentcontextdistributionprotocol/agentcontextdistributionprotocol/blob/main/RELEASE.md); RFC lifecycle in
+[`rfcs/README.md`](https://github.com/agentcontextdistributionprotocol/agentcontextdistributionprotocol/blob/main/rfcs/README.md).
 
 Adopting the action buys two guards the inline shape doesn't have: it
 verifies the `ref:` input is 40 hex characters before checking anything out
@@ -287,12 +273,12 @@ mutable major tag) or a full commit SHA with a trailing `# v1` comment.
 **Ruling: callers MUST pin `checkout-spec` by full commit SHA, with a
 trailing `# v1` comment kept for human readability** — e.g.
 `agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b  # v1`.
-`@v1` is no longer the documented shape for this action. This mandate costs
-**zero migrations today**: `acdp-verifier-py` is the only repo that has
-adopted the action at all, and it is already SHA-pinned this way.
+`@v1` is no longer the documented shape for this action. The two adopters
+(`acdp-verifier-py`, `acdp-registry-rs`) are already SHA-pinned this way, so the
+mandate cost no migration.
 
-`acdp-ci`'s `main` is currently **unprotected**, and has **no CI of its
-own** — every workflow here is either `workflow_call`-only
+`acdp-ci`'s `main` is protected (by `scripts/standardize.sh`, protection-only: no
+required checks), and has **no CI of its own** — every workflow here is either `workflow_call`-only
 (`auto-merge.yml`, `bump-consume.yml`, `bump-spec-ref.yml`) or
 `schedule`/`workflow_dispatch`-only (`drift-check.yml`), so `main` produces
 zero check-runs from its own PRs (the reason `scripts/standardize.sh`
@@ -321,9 +307,9 @@ actions, tag-trust first-party `actions/*` — see Conventions in
 a force-moved tag, reads closer to the third-party profile than to
 `actions/checkout@v4`.
 
-1. On a conformance-relevant push (`schemas/**`, `examples/**`, `rfcs/**`),
-   the spec repo's `notify-spec-consumers.yml` dispatches
-   `repository_dispatch: spec-released {sha}` to each pinner.
+1. On a conformance-relevant push, the spec repo's `notify-spec-consumers.yml`
+   (path filter and target list live there) dispatches
+   `repository_dispatch: spec-released {sha}` to each notified pinner.
 2. The pinner's `bump-spec.yml` calls `bump-spec-ref.yml@v1`, which rewrites the
    pinned `ref:` in the target workflow file and opens a PR that is **never
    auto-merged** — the PR's own conformance CI runs against the new fixtures, and
@@ -333,25 +319,9 @@ a force-moved tag, reads closer to the third-party profile than to
 
 #### Adopting `checkout-spec` in a new consumer repo
 
-Add a step **after your own repo's checkout** (see Ordering, below) to the job
-that needs the spec:
-
-```yaml
-steps:
-  - uses: actions/checkout@v4   # your own repo — MUST come first, see Ordering
-
-  - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b  # v1
-    id: spec
-    with:
-      ref: f5b66b8f86f48ba16f79bba95eb246d6acb43989   # pinned spec SHA — bumped via bump-spec-ref.yml
-
-  # Consumer that reads the env var (e.g. a Rust harness like acdp-rs/acdp-registry-rs):
-  - run: cargo test --features conformance
-    # $ACDP_SPEC_DIR is set for every step below this one in the job.
-
-  # Consumer that takes a CLI flag instead (e.g. acdp-verifier-py):
-  - run: python run_conformance.py --spec-dir ${{ steps.spec.outputs.path }}
-```
+Add the `checkout-spec` step **after your own repo's checkout**, pinned by SHA as ruled
+above. The exact step, the input/output reference and the ordering rule live in the
+[action's README](actions/checkout-spec/README.md) — the one copy of that usage block.
 
 Then add a thin `bump-spec.yml` caller so a spec release reaches this repo
 automatically:
@@ -378,16 +348,59 @@ jobs:
       ACDP_BOT_PRIVATE_KEY: '${{ secrets.ACDP_BOT_PRIVATE_KEY }}'
 ```
 
-**Ordering.** `actions/checkout` cleans its destination. Your own repo's
-checkout must run **before** the `checkout-spec` step, or it will wipe the
-spec checkout out from under it. See the action's own README for the full
-input/output reference and the `fetch-depth: 0` remedy for an unreachable pin.
+**Ordering.** Your own repo's checkout must run before the `checkout-spec` step or it
+wipes the spec checkout; see the action README (which also covers the `fetch-depth: 0`
+remedy for an unreachable pin and the one-pin-per-file limit of `bump-spec-ref.yml`).
+
+## Branch protection and drift detection
+
+`scripts/standardize.sh` is the single place branch protection is defined for the
+managed repos (`ALL_REPOS`; the deliberately unmanaged ones are `EXCLUDED_REPOS`, each
+with a recorded reason). The required-check list is a wholesale `PUT`, so the script
+first reads live protection and refuses to drop a live check it does not declare:
+
+```mermaid
+flowchart TD
+  start["for each repo in ALL_REPOS"] --> src{"where do the declared<br/>required checks come from?"}
+  src -- "checks_for(): a list" --> decl["declared list"]
+  src -- "checks_for(): empty" --> po["protection-only<br/>(acdp-ci, .github)"]
+  src -- "registry repo" --> base["its own<br/>.github/required-checks.json<br/>(validated, fail-closed)"]
+  decl --> live["read live protection<br/>(branch summary)"]
+  base --> live
+  po --> live
+  live -- "unreadable" --> err["error — never a silent pass"]
+  live --> diff{"compare declared vs live"}
+  diff -- "live check not declared" --> drift["DRIFT: apply refuses unless<br/>--allow-check-removal"]
+  diff -- "declared, not live yet" --> pend["PENDING: apply will add it"]
+  base -. "baseline would lower enforce_admins<br/>or re-pin a check" .-> weak["DRIFT: weakening guard<br/>(reads branches/b/protection)"]
+  diff -- "equal" --> ok["in sync"]
+  drift --> mode{"mode"}
+  pend --> mode
+  weak --> mode
+  ok --> mode
+  mode -- "--check" --> rep["report only, zero mutating calls"]
+  mode -- "apply" --> put["PATCH repo settings, then PUT protection"]
+```
+
+`--check` also enumerates the org once (default full sweep only) and reports any
+non-archived repo in neither list as `UNREGISTERED`. Exit codes: **0** clean, **1** a
+result (drift, pending, unregistered, unreadable repo, or a named unmanaged repo),
+**2** the check could not run. `drift-check.yml` runs this weekly and files or updates one
+tracking issue on exit 1, and hard-fails on exit 2. The full contract is in the
+[`standardize.sh` header](scripts/standardize.sh) and
+[`tests/standardize`](tests/standardize/README.md).
 
 ## Merge policy
 
 Patch + minor auto-merge on a green pipeline; **majors are held** for a human
 (Dependabot majors, and breaking SDK bumps — `major`, or a `minor` while
-`0.x` — from `bump-consume`).
+`0.x` — from `bump-consume`). Both workflows take `allow-major` to arm a
+breaking bump anyway. `auto-merge.yml` additionally takes `exclude-dependencies`
+and `exclude-groups` deny lists: a match holds the PR (e.g. for crypto-critical
+dependencies) and disarms an already-armed one; deny lists only ever add holds, and
+an undeterminable dependency list holds (fail-safe). The decision tree is in the
+[`auto-merge-gate` README](actions/auto-merge-gate/README.md); caller examples in
+the [README](README.md).
 
 ## CI baseline
 
@@ -430,8 +443,9 @@ auto-merge never overrides it. acdp-rs exceeds this baseline. New SDK repos
 This bar applies to every repo that ships code — see the Repo matrix below.
 `acdp-ci` and `.github` are structurally exempt, not exceptions: neither ships
 application code (`acdp-ci` is CI/CD YAML + docs with zero check-runs on its
-own PRs; `.github` has no `.github/workflows/` at all), so `standardize.sh`
-manages them protection-only, with no required checks to configure.
+own PRs; the org `.github` repo's only workflow is its own `posture-drift.yml`,
+which is not a required check), so `standardize.sh` manages them protection-only,
+with no required checks to configure.
 **As of 2026-09-05, every code-shipping repo meets this baseline in full.**
 `acdp-control-plane` was the one tracked exception to the no-alias row above
 — tracked as
@@ -440,18 +454,18 @@ manages them protection-only, with no required checks to configure.
 closed, verified live against `origin/main`. No code-shipping repo currently
 carries an npm alias for a family package.
 
-`auto-merge.yml` and `bump-consume.yml` both now enforce this baseline
-themselves: `auto-merge.yml` hard-fails (rather than silently completing) on a
-repo whose `main` hasn't yet adopted `standardize.sh` branch protection with at
-least one required status check, and `bump-consume.yml`'s own auto-merge call
-(bot-authored SDK bump PRs) carries the identical guard — the PR still opens
-either way, only the unattended merge is withheld. Note: once `acdp-ci` and
+`auto-merge.yml` and `bump-consume.yml` both enforce this baseline themselves,
+**with different failure modes**: `auto-merge.yml` hard-fails (rather than silently
+completing) on a repo whose `main` hasn't yet adopted `standardize.sh` branch
+protection with at least one required status check, while `bump-consume.yml`'s
+own auto-merge step (bot-authored SDK bump PRs) emits a warning and skips arming
+— the PR opens either way, only the unattended merge is withheld. Note: once `acdp-ci` and
 `.github` are protected via `standardize.sh`, they still have **zero**
 required status checks by design (above) — so they'd still, correctly, fail
 this same guard. "Protected" must not be read as "passes the auto-merge
 guard." Harmless in practice today: neither repo calls `auto-merge.yml` —
 `acdp-ci`'s only mention of it is a comment in the workflow's own header, and
-the `.github` repo has no `.github/workflows/` directory at all.
+the `.github` repo's one workflow is `posture-drift.yml`.
 
 ## Credentials
 
@@ -477,7 +491,10 @@ token-mint step requests only `permission-contents: write` and
 no `permission-workflows` input at all, so the token it mints can never carry
 Workflows scope, no matter what the App's org-wide installation grants.
 `bump-spec-ref.yml`'s token-mint step is the only one that additionally
-requests `permission-workflows: write`.
+requests `permission-workflows: write`. `drift-check.yml` mints a separate
+read-only token (`permission-contents: read` + `permission-administration: read`,
+org-scoped via `owner:`) for `standardize.sh --check`, and uses the job's own
+`GITHUB_TOKEN` (`issues: write`) only to file the tracking issue in this repo.
 
 **Callers pass `secrets:` explicitly, naming each secret the reusable workflow
 needs. `secrets: inherit` is prohibited for these reusable workflows.**
@@ -492,22 +509,18 @@ App token of its own and instead runs on the caller's own `GITHUB_TOKEN`
 (`auto-merge.yml`), that caller-side `permissions:` block stays load-bearing
 and must not be trimmed by analogy with this rule.
 
-**Adoption status — resolved.** As of 2026-09-24, verified against each repo's
-default branch through the contents API, all six reusable-workflow call sites
-(`acdp-control-plane/bump-acdp.yml`, `acdp-playground/bump-acdp.yml`,
-`acdp-verifier-py/bump-spec.yml`, `acdp-rs/bump-spec.yml`,
-`acdp-registry-rs/bump-acdp.yml`, `acdp-registry-rs/bump-spec.yml`) pass secrets
-explicitly, matching the rule above (`acdp-ui-console/bump-acdp.yml`, added 2026-09-27 in `acdp-ui-console#107`, is a seventh and also passes them explicitly — verified 2026-10-05). This was zero of six when the rule was first
-written on 2026-08-29 and three of six as of 2026-09-06 — the other three
-migrations landed in the callers' own repos, with no `acdp-ci` change involved.
-[acdp-ci#13](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/13),
-`acdp-rs#199`, and `acdp-registry-rs#144` — the tracking issue and the two
-per-repo caller issues it linked — are all closed.
+**Adoption status — resolved.** Every reusable-workflow call site in the family
+(the `bump-acdp.yml` callers in `acdp-control-plane`, `acdp-playground`,
+`acdp-registry-rs`, `acdp-ui-console`; the `bump-spec.yml` callers in
+`acdp-verifier-py`, `acdp-rs`, `acdp-registry-rs`) passes secrets explicitly (last verified
+2026-10-05); the migration ([acdp-ci#13](https://github.com/agentcontextdistributionprotocol/acdp-ci/issues/13),
+`acdp-rs#199`, `acdp-registry-rs#144`) is closed.
 
 This was a point-in-time migration, not an enforced invariant: nothing checks a
 *new* reusable-workflow caller against this rule (see below), so a future caller
 added with `secrets: inherit` won't be caught by anything but review. The org's
-`.github` workflow-templates already use the explicit named-secrets shape, so a
+[`.github` workflow-templates](https://github.com/agentcontextdistributionprotocol/.github/tree/main/workflow-templates)
+already use the explicit named-secrets shape, so a
 repo newly adopting a template gets this right from the start — that doesn't
 help a repo that copies an older shape by hand instead of from a template.
 
@@ -534,7 +547,10 @@ exception, by ruling (above): callers pin it by full commit SHA, so a
 `checkout-spec` caller does not re-resolve `v1` on every run — it stays on
 whatever SHA it last bumped to, until it deliberately bumps again. Moving
 `v1` is a **human-assisted** operation — no agent or workflow ever runs
-these commands.
+these commands. A scripted version of this runbook lives in
+[`scripts/handoff/`](scripts/handoff/README.md) (`2026-10-05-move-v1.sh`: dry-run by
+default, `--apply` plus a typed confirmation to move the tag); it targets
+`origin/main`, whereas the runbook below targets a given PR's merge commit.
 Run this **after** a PR to `acdp-ci` merges, and **before** creating/relying on
 the `v*` tag ruleset below (rehearse the move first; a ruleset created before the
 move has ever been exercised means the first failure mode is a rejected push
@@ -675,9 +691,11 @@ automatic, audit-logged bypass; rollback is one DELETE.
 | acdp-playground | Python/uv | own ci | ✅ | uv+ga | uv | Docker | consumes py |
 | acdp-verifier-py | Python | own ci | ✅ | pip+ga | — | — | independent |
 | acdp-ui-console | TS | own ci | ✅ | npm+ga | npm | Vercel | consumes wasm (`acdp-wasm`) via dispatch → `bump-acdp.yml` |
-| acdp-website | MDX | own ci | add | npm+ga | — | Vercel | leaf |
+| acdp-website | MDX | own ci | n/a — excluded from `standardize.sh` (private repo; protection API 403s) | npm+ga | — | Vercel | leaf |
+| agentcontextdistributionprotocol (the spec) | schemas / RFCs | own | ✅ (`auto-merge.yml@v1`), managed by `standardize.sh` | — | — | — | **spec source**; notifies `acdp-rs`, `acdp-verifier-py`, `acdp-registry-rs` via `notify-spec-consumers.yml` |
+| acdp-docs | KB + MCP server | — | n/a — excluded from `standardize.sh` (private; no managed checks) | — | — | — | knowledge base; links to this repo, not a pipeline participant |
 | acdp-ci | YAML/bash | n/a — also has `drift-check.yml` (`schedule`/`workflow_dispatch`) as of CI-8, but zero check-runs on its own PRs still holds | ❌ (protection-only, see `standardize.sh`) | ga (2 dirs: root + `actions/checkout-spec`) | — | — | **infra — this is the hub; every repo above consumes it at `@v1`** |
-| `.github` | — | n/a — no `.github/workflows/` at all | ❌ (protection-only, see `standardize.sh`) | — | — | — | org profile + community health files |
+| `.github` | — | n/a — only its own `posture-drift.yml` | ❌ (protection-only, see `standardize.sh`) | — | — | — | org profile + community health files |
 
 ## Extending to new SDKs (Java / Go / Kotlin)
 
