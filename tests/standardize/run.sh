@@ -515,7 +515,7 @@ write_unprotected_fixture() {
 write_org_listing() {
   fx_dir="$1"; shift
   {
-    for n in acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol acdp-ci .github acdp-rs acdp-website; do
+    for n in acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol acdp-ci .github acdp-rs acdp-website acdp-docs; do
       printf '%s\tfalse\n' "$n"
     done
     for e in "$@"; do printf '%s\t%s\n' "${e%%:*}" "${e##*:}"; done
@@ -571,7 +571,7 @@ assert_zero_mutations "$LOG" "sweep --check: zero mutating calls across the whol
 rm -rf "$SWEEP_FX"
 
 # --- G4 regression guard: the default no-arg full sweep must NOT change --
-#     it never names an unmanaged repo (acdp-rs/acdp-website are excluded
+#     it never names an unmanaged repo (acdp-rs/acdp-website/acdp-docs are excluded
 #     from ALL_REPOS on purpose), so a clean, fully-in-sync --check sweep
 #     must still exit 0 exactly as before this fix. ---
 CLEAN_SWEEP_FX="$(mktemp -d)"
@@ -879,6 +879,14 @@ else
 fi
 grep -q "orgs/$ORG/repos" "$LOG" && pass "B1: the sweep did enumerate the org (not vacuous)" || fail "B1: the sweep did enumerate the org (not vacuous)" "no orgs/ call in log"
 
+# B10: acdp-docs (private KB + MCP repo) is deliberately excluded: it is in the
+# listing yet never reported UNREGISTERED. Not vacuous -- the listing really
+# contains it.
+jq -e 'any(.[]; .name == "acdp-docs")' "$U_FX/orgs_${ORG}_repos.json" >/dev/null \
+  && ! printf '%s' "$out" | grep -q "UNREGISTERED: acdp-docs" \
+  && pass "B10: acdp-docs is in the org listing and treated as deliberately excluded" \
+  || fail "B10: acdp-docs is in the org listing and treated as deliberately excluded" "out=$out"
+
 # B2: an unaccounted-for repo -> exit 1, named, no DRIFT, zero mutations.
 write_org_listing "$U_FX" acdp-newrepo:false
 LOG="$(new_log)"
@@ -956,7 +964,7 @@ rm -rf "$G4_FX"
 
 # B8: a repo that is both managed and excluded is a config error (exit 2).
 CFG_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/std-cfg.XXXXXX")"
-sed 's/^EXCLUDED_REPOS="acdp-rs acdp-website"/EXCLUDED_REPOS="acdp-rs acdp-ci acdp-website"/' "$STANDARDIZE" > "$CFG_SCRIPT"
+sed 's/^EXCLUDED_REPOS="acdp-rs acdp-website acdp-docs"/EXCLUDED_REPOS="acdp-rs acdp-ci acdp-website acdp-docs"/' "$STANDARDIZE" > "$CFG_SCRIPT"
 LOG="$(new_log)"
 out="$(FIXTURES="$FIXTURES_ROOT/unprotected" GH_LOG="$LOG" bash "$CFG_SCRIPT" --check acdp-ci 2>&1)"; rc=$?
 rm -f "$CFG_SCRIPT"

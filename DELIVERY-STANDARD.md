@@ -468,6 +468,7 @@ App repository permissions:
 | Contents: Read/write | commit bump branches; POST `repository_dispatch` |
 | Pull requests: Read/write | open the bump PRs |
 | **Workflows: Read/write** | **required** for `bump-spec-ref` — the spec pin lives in `.github/workflows/ci.yml`, and GitHub blocks an App from pushing changes under `.github/workflows/` without it |
+| Administration: Read | `drift-check.yml` mints a read-only token with it so `standardize.sh --check` can read `branches/{b}/protection` (the registry baseline weakening guard); never requested by any other workflow |
 
 `bump-consume` (manifests/lockfiles) does not need Workflows; only spec-pin
 propagation does — enforced, not merely asserted: `bump-consume.yml`'s

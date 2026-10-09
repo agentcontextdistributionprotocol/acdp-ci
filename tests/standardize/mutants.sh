@@ -247,6 +247,7 @@ B2: unregistered repo -> exit 1, named, no DRIFT"
 apply_mutant "UNREGISTERED: exclusion subtraction removed (excluded repos reported)" \
   'case " $ALL_REPOS $EXCLUDED_REPOS " in *" $name "*) continue ;; esac' 'case " $ALL_REPOS " in *" $name "*) continue ;; esac' \
   "B1: every org repo accounted for -> exit 0, no UNREGISTERED
+B10: acdp-docs is in the org listing and treated as deliberately excluded
 B5: archived extra repo is ignored, and reported as ignored
 G1c: clean full sweep still exits 0, no PENDING marker
 G4 regression guard: default no-arg full sweep --check still exits 0"

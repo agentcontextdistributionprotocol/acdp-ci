@@ -28,7 +28,10 @@
 # missing branch, missing repo, insufficient scope — separable only by
 # string-matching the error body. The summary instead returns 200 with
 # .protected=false for an unprotected branch, so "unprotected" is a
-# positive signal and every non-200 is unambiguously fatal) and refuses to
+# positive signal and every non-200 is unambiguously fatal. The /protection
+# endpoint is READ in exactly ONE place: baseline_regressions(), for the
+# registry repo only, because the summary payload carries no enforce_admins
+# -- see the note there and the token requirement below) and refuses to
 # proceed if any live required context is absent from checks_for()'s
 # declared list for that repo, unless --allow-check-removal is passed. This
 # is a set difference, not equality: order and duplicates never matter, so
@@ -74,13 +77,17 @@
 #   pending-apply, and the sweep continues to the remaining repos rather
 #   than aborting; the exit status reflects whatever accumulated (drift
 #   and/or errors and/or pending-apply) only after the whole sweep
-#   completes. --check needs only contents:read; apply needs admin.
+#   completes. --check needs contents:read on every managed repo, PLUS
+#   administration:read for the registry repo (baseline_regressions() reads
+#   branches/{b}/protection, which GitHub gates behind Administration:read);
+#   apply needs admin.
 #
 # Portable to macOS's stock bash 3.2 (no associative arrays).
 #
 # Excluded on purpose:
 #   acdp-rs      — already protected with its own (richer) config; do not clobber.
 #   acdp-website — private repo; branch protection needs GitHub Pro or public.
+#   acdp-docs    — private knowledge-base + MCP-server repo; no managed CI checks.
 #
 # Protection-only (managed here, but with zero required checks):
 #   acdp-ci  — as of CI-8 (drift-check.yml), not every workflow here is
@@ -112,8 +119,9 @@
 #              force-moved to wherever `main` points, protecting `main` from
 #              force-push/deletion is the upstream half of protecting `v1`
 #              (the ruleset in DELIVERY-STANDARD.md is the other half).
-#   .github  — the org's `.github` repo has no `.github/workflows/` directory at
-#              all (verified via the contents API) — same reasoning as acdp-ci.
+#   .github  — the org's `.github` repo runs only posture-drift.yml (a
+#              workflow of its own, not a check this script requires) — same
+#              reasoning as acdp-ci: nothing to require, so protection only.
 # Neither gets allow_auto_merge=true: auto-merge.yml's `gh pr merge --auto` would
 # merge a PR instantly on a branch with no required checks — a hazard, not a
 # convenience, on a zero-check repo. auto-merge.yml and bump-consume.yml both
@@ -175,8 +183,9 @@
 # narrowed to "selected repositories", an uninstalled new repo is invisible
 # here; it is only noticed when an accounted-for repo drops out of the listing.
 #
-# Prereqs: gh auth with admin:org for apply; contents:read is enough to run
-#          --check. Org secrets (App id/key) are set separately.
+# Prereqs: gh auth with admin:org for apply. --check needs contents:read plus
+#          administration:read (the registry baseline guard reads the
+#          protection endpoint). Org secrets (App id/key) are set separately.
 # Usage: ./standardize.sh [--check|--dry-run] [--allow-check-removal] [repo ...]
 #        ./standardize.sh -h | --help
 #        (default repo list, and order flags may appear in: see below)
@@ -194,11 +203,12 @@ ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py 
 # from ALL_REPOS is either listed here with a reason, or it is reported. If the
 # exclusions were merely "whatever is not in ALL_REPOS" the check would compare
 # a list against itself.
-EXCLUDED_REPOS="acdp-rs acdp-website"
+EXCLUDED_REPOS="acdp-rs acdp-website acdp-docs"
 excluded_reason() {
   case "$1" in
     acdp-rs) echo "self-governed: its own required checks and crypto-critical Dependabot gate (acdp-rs#351); a contexts-only PUT from here would replace them wholesale" ;;
     acdp-website) echo "private repo on a free plan: branch protection and rulesets both 403" ;;
+    acdp-docs) echo "private knowledge-base + MCP-server repo (not a CI-gated library); no required checks to manage" ;;
     *) return 1 ;;
   esac
 }
@@ -218,7 +228,8 @@ Usage: standardize.sh [--check|--dry-run] [--allow-check-removal] [repo ...]
        standardize.sh -h | --help
 
   --check, --dry-run     Read-only: report required-check drift per repo,
-                          make zero mutating calls. Needs only contents:read.
+                          make zero mutating calls. Needs contents:read, plus
+                          administration:read (registry baseline guard).
   --allow-check-removal  Apply mode only: proceed with the protection PUT
                           even if it would drop a live required check that
                           checks_for() doesn't declare.
@@ -233,11 +244,11 @@ Exit codes (a contract -- .github/workflows/drift-check.yml routes on these):
   1  A RESULT. The survey ran and found something worth reporting: drift,
      a pending declared check, an UNREGISTERED org repo (neither managed nor
      deliberately excluded; full sweep only), or some (but not all) repos
-     unreadable.
+     unreadable, or an explicitly-named unmanaged repo (a per-repo error).
      drift-check.yml files/updates a tracking issue and leaves the job green.
-  2  NOT a result. The check could not run or learned nothing: bad flags, an
-     explicitly-named unmanaged repo, a missing dependency, or every surveyed
-     repo unreadable. drift-check.yml hard-fails the job.
+  2  NOT a result. The check could not run or learned nothing: bad flags, a
+     missing dependency, a config error, or every surveyed repo unreadable.
+     drift-check.yml hard-fails the job.
 Keep 1 and 2 distinct. Collapsing them makes a monitor that cannot see report
 identically to one that looked and found nothing.
 EOF
@@ -518,8 +529,8 @@ for repo in $repos; do
     # out to be unmanaged is almost always a typo -- e.g. `--check
     # acdp-registryrs` -- and CHECK_MODE must not exit 0 having surveyed
     # nothing. The default no-arg sweep is unaffected: it never names an
-    # unmanaged repo in the first place (ALL_REPOS excludes acdp-rs and
-    # acdp-website on purpose), and checks_for()'s tri-state skip itself is
+    # unmanaged repo in the first place (ALL_REPOS excludes acdp-rs,
+    # acdp-website and acdp-docs on purpose), and checks_for()'s tri-state skip itself is
     # unchanged either way.
     if [ "$CHECK_MODE" -eq 1 ] && [ "$EXPLICIT_REPOS" -eq 1 ]; then
       ERRORS=1
@@ -767,7 +778,7 @@ if [ "$CHECK_MODE" -eq 1 ]; then
   # leave the job green, which is precisely the permission-degraded case this
   # guard exists to make visible. Exit 2 so drift-check.yml hard-fails instead.
   if [ "$SURVEYED" -gt 0 ] && [ "$UNREADABLE" -eq "$SURVEYED" ]; then
-    echo "--check: FATAL: all $SURVEYED surveyed repo(s) were unreadable -- this is a broken run, not a drift result (check gh auth and the token's contents:read grant); see '!!' lines above." >&2
+    echo "--check: FATAL: all $SURVEYED surveyed repo(s) were unreadable -- this is a broken run, not a drift result (check gh auth and the token's contents:read / administration:read grants); see '!!' lines above." >&2
     exit 2
   fi
   # The org-level registry check (acdp-ci#19). Only for the default full sweep:
@@ -803,7 +814,7 @@ if [ "$CHECK_MODE" -eq 1 ]; then
   fi
 
   if [ "$DRIFT" -ne 0 ] || [ "$ERRORS" -ne 0 ] || [ "$PENDING" -ne 0 ] || [ "$UNREGISTERED" -ne 0 ]; then
-    # Three independent conditions, tracked separately -- report exactly
+    # Four independent conditions, tracked separately -- report exactly
     # which fired instead of a single blended "drift and/or errors" line
     # that would blur a pending-apply into a drift report (or vice versa).
     found=""

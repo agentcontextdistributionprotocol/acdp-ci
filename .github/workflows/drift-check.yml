@@ -25,21 +25,23 @@ name: drift-check
 # Two tokens, two different jobs -- do not try to collapse this to one:
 #   - App installation token (acdp-deps-bot, org secrets ACDP_BOT_APP_ID /
 #     ACDP_BOT_PRIVATE_KEY), minted with ONLY `permission-contents: read`
-#     and scoped org-wide via `owner:` -- this is what standardize.sh
-#     --check needs to `gh api` every managed repo's branch summary.
-#     GITHUB_TOKEN would in fact suffice for this READ today: every managed
-#     repo is public, and `.protection` (including
-#     `required_status_checks.contexts`) is readable even unauthenticated --
-#     verified live against acdp-registry-rs. The App token is used
-#     deliberately anyway, so the survey keeps working unchanged if a
-#     managed repo is ever made private in the future, the way acdp-website
-#     already is -- which is precisely why acdp-website is excluded from the
-#     managed set. GITHUB_TOKEN here is scoped to acdp-ci alone and could
-#     never read a private sibling; the App's org-wide installation can.
+#     and `permission-administration: read` and scoped org-wide via `owner:`
+#     -- this is what standardize.sh --check needs to `gh api` every managed
+#     repo's branch summary (contents:read) and, for the registry repo's
+#     weakening guard (baseline_regressions()), branches/{b}/protection,
+#     which GitHub gates behind Administration:read. Read-only both ways.
+#     GITHUB_TOKEN cannot do this job: it is scoped to acdp-ci alone, so it
+#     could not read any sibling's protection (and the /protection read needs
+#     Administration:read, which GITHUB_TOKEN cannot be granted on another
+#     repo). The branch-summary read alone happens to work unauthenticated on
+#     public repos, but the survey no longer stops there, and the App's
+#     org-wide installation also keeps it working if a managed repo is ever
+#     made private -- the way acdp-website and acdp-docs already are, which
+#     is why they are excluded from the managed set.
 #   - GITHUB_TOKEN, for filing/commenting the tracking issue in *this*
 #     repo. The acdp-deps-bot App has no Issues permission (see
 #     DELIVERY-STANDARD.md's credential table: Contents, Pull requests,
-#     Workflows -- nothing else), and this phase does not request one; the
+#     Workflows, plus Administration:read for this survey -- no Issues), and this phase does not request one; the
 #     credential model here is "zero PATs," and adding a new App grant for
 #     this alone is out of scope.
 # Neither token can do the other's half of the job.
@@ -90,6 +92,7 @@ jobs:
           app-id: ${{ secrets.ACDP_BOT_APP_ID }}
           private-key: ${{ secrets.ACDP_BOT_PRIVATE_KEY }}
           permission-contents: read
+          permission-administration: read
           owner: ${{ github.repository_owner }}
 
       - uses: actions/checkout@v7
@@ -148,7 +151,7 @@ jobs:
           {
             echo "\`scripts/standardize.sh --check\` found required-status-check drift, an unreadable repo, **or** a declared check not yet applied, on this run (or an org repo that is neither managed nor deliberately excluded)."
             echo
-            echo "\`--check\` is fail-closed: it exits non-zero when any of four independent conditions occur -- a live required check would be dropped by the next apply (drift), a repo/branch simply couldn't be read (e.g. a degraded token), \`checks_for()\` declares a check that isn't live yet (pending an apply), or an org repo is in neither \`ALL_REPOS\` nor \`EXCLUDED_REPOS\` (UNREGISTERED -- fix by adding it to one of them, with a reason if excluded). This issue does not distinguish which -- read the output below (drift lines start \`!! DRIFT:\`, pending-apply lines start \`!! PENDING:\`, unregistered lines start \`!! UNREGISTERED:\`, unreadable-repo lines are the remaining \`!!\` lines)."
+            echo "\`--check\` is fail-closed: it exits non-zero when any of four independent conditions occur -- a live required check would be dropped by the next apply (drift), a repo/branch simply couldn't be read (e.g. a degraded token), \`checks_for()\` declares a check that isn't live yet (pending an apply), or an org repo is in neither \`ALL_REPOS\` nor \`EXCLUDED_REPOS\` (UNREGISTERED -- fix by adding it to one of them, with a reason if excluded). This issue does not distinguish which -- read the output below (drift lines start \`!! DRIFT:\` (including registry baseline-weakening lines, where the repo's own \`.github/required-checks.json\` would lower enforce_admins or re-pin a check), pending-apply lines start \`!! PENDING:\`, unregistered lines start \`!! UNREGISTERED:\`, unreadable-repo lines are the remaining \`!!\` lines)."
             echo
             echo "Run: $RUN_URL"
             echo
@@ -160,7 +163,7 @@ jobs:
             echo
             echo "**Known blind spot:** this check only compares *declared* required checks (\`checks_for()\` in \`scripts/standardize.sh\`) against what's *live* in branch protection. It cannot see a real PR gate -- a check-run some repo's CI actually produces -- that was never added to protection as a required check in the first place. A green/silent run of this workflow means \"nothing declared has drifted or is pending,\" not \"every real gate is required.\" Finding that gap means comparing \`checks_for()\` against each repo's CI workflow by hand."
             echo
-            echo "**Remedy:** run \`./scripts/standardize.sh <repo>\` (no \`--check\`) locally with \`gh auth\` admin:org for the affected repo (or with no repo argument to apply to every managed repo), after reconciling \`checks_for()\` with what should be live -- see the script's header comment for the drift guard and \`--allow-check-removal\`. For a pending-apply-only issue (no drift), the apply is expected to complete without needing \`--allow-check-removal\`."
+            echo "**Remedy:** run \`./scripts/standardize.sh <repo>\` (no \`--check\`) locally with \`gh auth\` admin:org for the affected repo (or with no repo argument to apply to every managed repo), after reconciling \`checks_for()\` with what should be live (for \`acdp-registry-rs\`, its own \`.github/required-checks.json\` is the source of truth, not \`checks_for()\`) -- see the script's header comment for the drift guard and \`--allow-check-removal\`. For a pending-apply-only issue (no drift), the apply is expected to complete without needing \`--allow-check-removal\`."
           } > drift-check-body.md
 
           # --limit: gh's own default is 30 -- fine today (this label has a
