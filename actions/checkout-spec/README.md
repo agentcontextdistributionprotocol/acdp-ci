@@ -17,7 +17,7 @@ checked-out files are available to whatever you run next in the same job.
 ```yaml
 steps:
   # Your own checkout MUST come first — see "Ordering" below.
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v7
 
   - uses: agentcontextdistributionprotocol/acdp-ci/actions/checkout-spec@015910153b61c32abbe018afe85d44868897bf3b # v1
     id: spec
@@ -38,10 +38,10 @@ steps:
 |---|---|---|
 | `ref` | *(required)* | The pinned spec commit. **Must be 40-hex lowercase; anything else is a hard error** before any network call. |
 | `repository` | `agentcontextdistributionprotocol/agentcontextdistributionprotocol` | Spec repo. |
-| `path` | `acdp-spec` | Checkout path, relative to the workspace. |
+| `path` | `acdp-spec` | Checkout path, **relative** to the workspace. |
 | `fetch-depth` | `1` | Passed through to `actions/checkout`. Use `0` if `ref` is unreachable from any ref at the default shallow depth (e.g. the spec force-pushed it away). |
-| `set-env` | `true` | Export `ACDP_SPEC_DIR` to `$GITHUB_ENV`. |
-| `require-conformance` | `true` | Export `ACDP_REQUIRE_CONFORMANCE=1` to `$GITHUB_ENV`. **Hard error if `true` while `set-env` is `false`** — family consumers (e.g. `acdp-rs`) treat `ACDP_REQUIRE_CONFORMANCE` set without `ACDP_SPEC_DIR` as a failure, so this action refuses to produce that combination. Set both or neither. |
+| `set-env` | `true` | Export `ACDP_SPEC_DIR` to `$GITHUB_ENV`. Must be the literal `true` or `false` — any other value is a hard error. |
+| `require-conformance` | `true` | Export `ACDP_REQUIRE_CONFORMANCE=1` to `$GITHUB_ENV`. Literal `true`/`false` only. **Hard error if `true` while `set-env` is `false`** — family consumers (e.g. `acdp-rs`) treat `ACDP_REQUIRE_CONFORMANCE` set without `ACDP_SPEC_DIR` as a failure, so this action refuses to produce that combination. Set both or neither. |
 
 ## Outputs
 
@@ -57,7 +57,20 @@ checkout runs **after** this action, in the workspace root, it will wipe the
 spec checkout. Always run your own `actions/checkout` step **before** this
 action.
 
+## Guarantees
+
+- `ref` is validated *before* any network call; a branch, tag or short SHA is rejected.
+- After checkout the action asserts `HEAD == ref` and hard-fails otherwise, so a ref that
+  resolved to something else can never be used silently.
+- The checkout runs with `persist-credentials: false`; the spec repo is public and no token
+  is left in `.git/config`.
+
 ## Notes
+
+- **`bump-spec-ref.yml` expects one pin per file.** It rewrites the single `ref:` anchor in
+  the target workflow file and fails if there is not exactly one. An explicit `repository:`
+  override on this action counts as a second anchor and makes that rewrite fail, so keep the
+  default repository when you want automated spec bumps.
 
 - **Matrix jobs** re-run this action once per matrix leg, on a fresh runner
   each time. That's correct, not wasteful enough to justify artifact
