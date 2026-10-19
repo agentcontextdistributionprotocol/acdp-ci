@@ -12,7 +12,7 @@ registry credential:
 
 | Package | Workflow (in acdp-rs) | Trigger | Registry | Credential |
 |---|---|---|---|---|
-| `acdp` crate | `release-plz.yml` | push to `main` | crates.io | `CARGO_REGISTRY_TOKEN` |
+| `acdp` crate | `release-plz.yml` | push to `main` | crates.io | OIDC Trusted Publishing (no token) |
 | `@agentcontextdistributionprotocol/acdp` (NAPI) | `bindings-release.yml` | tag `acdp-node-v*` | npm | `NPM_TOKEN` |
 | `acdp` wheels | `acdp-py-release.yml` | tag `acdp-py-v*` | PyPI | OIDC (no token) |
 | `@agentcontextdistributionprotocol/acdp-wasm` | `acdp-wasm-release.yml` | tag `acdp-wasm-v*` | npm | `NPM_TOKEN` |
@@ -473,8 +473,13 @@ the `.github` repo's one workflow is `posture-drift.yml`.
 One GitHub App (`acdp-deps-bot`), installed org-wide, key stored once as org
 secrets `ACDP_BOT_APP_ID` / `ACDP_BOT_PRIVATE_KEY`. Every cross-repo dispatch and
 every bot PR mints a short-lived installation token from it — **zero PATs**.
-Registry-publish tokens (`NPM_TOKEN`, `CARGO_REGISTRY_TOKEN`; PyPI is OIDC) stay
-in `acdp-rs`.
+The only stored registry-publish token is `NPM_TOKEN`, and it stays in `acdp-rs`.
+crates.io and PyPI both publish via OIDC Trusted Publishing — the job exchanges its
+GitHub `id-token` for a short-lived registry token, so nothing long-lived is stored.
+Trusted Publishing authenticates the upload; it is not provenance (the crate still has
+no attestation — see above). The crates.io trusted-publisher setup and the
+first-publish-by-hand rule are owned by `acdp-rs`:
+[supply-chain: crates.io](https://github.com/agentcontextdistributionprotocol/acdp-rs/blob/main/docs/supply-chain.md#cratesio-acdp-and-the-workspace-crates).
 
 App repository permissions:
 
