@@ -515,7 +515,7 @@ write_unprotected_fixture() {
 write_org_listing() {
   fx_dir="$1"; shift
   {
-    for n in acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol acdp-ci .github acdp-rs acdp-website acdp-docs; do
+    for n in acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-agent-hooks acdp-ui-console agentcontextdistributionprotocol acdp-ci .github acdp-rs acdp-website acdp-docs; do
       printf '%s\tfalse\n' "$n"
     done
     for e in "$@"; do printf '%s\t%s\n' "${e%%:*}" "${e##*:}"; done
@@ -534,6 +534,7 @@ write_insync_fixture "$SWEEP_FX" acdp-control-plane "lint + tsc + jest (unit, co
 write_insync_fixture "$SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
 write_insync_fixture "$SWEEP_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
 write_insync_fixture "$SWEEP_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+write_insync_fixture "$SWEEP_FX" acdp-agent-hooks "lint + types + tests (3.10)" "lint + types + tests (3.12)" "lint + types + tests (3.13)" "minimal install (no extras)" "integration (local acdp-registry-rs)" "build + twine check"
 write_insync_fixture "$SWEEP_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
 write_insync_fixture "$SWEEP_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$SWEEP_FX" acdp-ci
@@ -546,10 +547,10 @@ rm -f "$SWEEP_FX/repos_${ORG}_acdp-control-plane_branches_main.json"
 LOG="$(new_log)"
 out="$(FIXTURES="$SWEEP_FX" GH_LOG="$LOG" GH_STUB_RECORD=0 "$STANDARDIZE" --check 2>&1)"
 rc=$?
-# Exactly 1, not merely nonzero: 1 of 8 unreadable is a genuine per-repo
+# Exactly 1, not merely nonzero: 1 of 9 unreadable is a genuine per-repo
 # finding and must stay reportable. Only a wholly-failed survey escalates to
 # the fatal 2. Asserting "nonzero" here would let the two collapse together.
-[ "$rc" -eq 1 ] && pass "sweep: partial failure (1 of 8 unreadable) stays a finding, exit 1" || fail "sweep: partial failure (1 of 8 unreadable) stays a finding, exit 1" "rc=$rc out=$out"
+[ "$rc" -eq 1 ] && pass "sweep: partial failure (1 of 9 unreadable) stays a finding, exit 1" || fail "sweep: partial failure (1 of 9 unreadable) stays a finding, exit 1" "rc=$rc out=$out"
 if printf '%s' "$out" | grep -q "acdp-control-plane"; then
   pass "sweep: the unreadable repo 1 is named in the output"
 else
@@ -579,6 +580,7 @@ write_insync_fixture "$CLEAN_SWEEP_FX" acdp-control-plane "lint + tsc + jest (un
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+write_insync_fixture "$CLEAN_SWEEP_FX" acdp-agent-hooks "lint + types + tests (3.10)" "lint + types + tests (3.12)" "lint + types + tests (3.13)" "minimal install (no extras)" "integration (local acdp-registry-rs)" "build + twine check"
 write_insync_fixture "$CLEAN_SWEEP_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
 write_insync_fixture "$CLEAN_SWEEP_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$CLEAN_SWEEP_FX" acdp-ci
@@ -689,6 +691,7 @@ write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-control-plane "lint + tsc + jest (u
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-agent-hooks "lint + types + tests (3.10)" "lint + types + tests (3.12)" "lint + types + tests (3.13)" "minimal install (no extras)" "integration (local acdp-registry-rs)" "build + twine check"
 write_insync_fixture "$CLEAN_SWEEP2_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
 write_insync_fixture "$CLEAN_SWEEP2_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$CLEAN_SWEEP2_FX" acdp-ci
@@ -824,6 +827,7 @@ write_insync_fixture "$CLEAN_FX" acdp-control-plane "lint + tsc + jest (unit, co
 write_insync_fixture "$CLEAN_FX" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
 write_insync_fixture "$CLEAN_FX" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
 write_insync_fixture "$CLEAN_FX" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+write_insync_fixture "$CLEAN_FX" acdp-agent-hooks "lint + types + tests (3.10)" "lint + types + tests (3.12)" "lint + types + tests (3.13)" "minimal install (no extras)" "integration (local acdp-registry-rs)" "build + twine check"
 write_insync_fixture "$CLEAN_FX" acdp-ui-console "Lint · Typecheck · Test · Build"
 write_insync_fixture "$CLEAN_FX" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
 write_unprotected_fixture "$CLEAN_FX" acdp-ci
@@ -861,6 +865,7 @@ build_clean_sweep() {
   write_insync_fixture "$d" acdp-registry-rs "rustfmt" "clippy" "tests" "conformance (spec fixtures)" "cargo-deny" "lint" "msrv" "rustdoc" "coverage" "docker (build + smoke)" "mutants pins"
   write_insync_fixture "$d" acdp-playground "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds"
   write_insync_fixture "$d" acdp-verifier-py "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)"
+  write_insync_fixture "$d" acdp-agent-hooks "lint + types + tests (3.10)" "lint + types + tests (3.12)" "lint + types + tests (3.13)" "minimal install (no extras)" "integration (local acdp-registry-rs)" "build + twine check"
   write_insync_fixture "$d" acdp-ui-console "Lint · Typecheck · Test · Build"
   write_insync_fixture "$d" agentcontextdistributionprotocol "All Validations Passed" "Validate Schemas, Examples, and Conformance"
   write_unprotected_fixture "$d" acdp-ci
