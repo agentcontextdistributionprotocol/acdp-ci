@@ -196,7 +196,7 @@ ORG=agentcontextdistributionprotocol
 # name here must stay free of whitespace and glob metacharacters. `.github`'s
 # leading dot is not one (no unquoted glob expands it), but this is a property of
 # the specific names, not something the script enforces.
-ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-ui-console agentcontextdistributionprotocol acdp-ci .github"
+ALL_REPOS="acdp-control-plane acdp-registry-rs acdp-playground acdp-verifier-py acdp-agent-hooks acdp-ui-console agentcontextdistributionprotocol acdp-ci .github"
 
 # Org repos that are DELIBERATELY not managed here, each with a reason. This is
 # what makes the UNREGISTERED check (acdp-ci#19) mean something: a repo absent
@@ -273,6 +273,8 @@ checks_for() {
       printf '%s\n' "pytest + smoke (py3.12)" "pytest + smoke (py3.13)" "docker image builds" ;;
     acdp-verifier-py)
       printf '%s\n' "conformance + tests + types (3.11)" "conformance + tests + types (3.12)" "conformance + tests + types (3.13)" "conformance + tests + types (3.14)" ;;
+    acdp-agent-hooks)
+      printf '%s\n' "lint + types + tests (3.10)" "lint + types + tests (3.12)" "lint + types + tests (3.13)" "minimal install (no extras)" "integration (local acdp-registry-rs)" "build + twine check" ;;
     acdp-ui-console)
       printf '%s\n' "Lint · Typecheck · Test · Build" ;;
     agentcontextdistributionprotocol)  # the spec/RFC repo
@@ -772,7 +774,7 @@ for repo in $repos; do
 done
 
 if [ "$CHECK_MODE" -eq 1 ]; then
-  # Every surveyed repo failed to read. That is not eight independent findings
+  # Every surveyed repo failed to read. That is not nine independent findings
   # -- it is one systemic failure (a degraded/expired token, gh unauthenticated,
   # the API unreachable), and reporting it as a finding would file an issue and
   # leave the job green, which is precisely the permission-degraded case this

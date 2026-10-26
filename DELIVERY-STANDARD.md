@@ -247,8 +247,10 @@ Which repos pin the spec, and how, as of 2026-10-09 (each repo's `ci.yml`, and
 snapshot): `acdp-verifier-py` and `acdp-registry-rs` (both its `ci.yml` and
 `mutants.yml`) use the composite action; `acdp-rs` pins inline in `ci.yml` **and**
 `bindings.yml` (its own `bump-spec.yml` opens a companion PR for the second pin);
-`acdp-control-plane` pins inline in `ci.yml` and has **no** `bump-spec` caller. Every
-pin is a 40-hex SHA; only the mechanism differs.
+`acdp-control-plane` pins inline in `ci.yml` and has **no** `bump-spec` caller;
+`acdp-agent-hooks` (added 2026-10-26) uses the composite action in `ci.yml` and has a
+`bump-spec.yml` caller, but is not in the spec's notify list, so its pin moves on a manual
+dispatch. Every pin is a 40-hex SHA; only the mechanism differs.
 
 **Notification gap (a decision, not an accident):** the spec repo's
 [`notify-spec-consumers.yml`](https://github.com/agentcontextdistributionprotocol/agentcontextdistributionprotocol/blob/main/.github/workflows/notify-spec-consumers.yml)
@@ -696,6 +698,7 @@ automatic, audit-logged bypass; rollback is one DELETE.
 | acdp-control-plane | npm | own ci | ✅ | npm+docker+ga | npm | Docker | consumes npm |
 | acdp-playground | Python/uv | own ci | ✅ | uv+ga | uv | Docker | consumes py |
 | acdp-verifier-py | Python | own ci | ✅ | pip+ga | — | — | independent |
+| acdp-agent-hooks | Python | own ci | ✅ | pip+ga | — (library, `acdp>=` floor) | PyPI (`release.yml`, Trusted Publishing) | agent-framework hooks; pins the spec (`checkout-spec`) for the OTel attribute registry |
 | acdp-ui-console | TS | own ci | ✅ | npm+ga | npm | Vercel | consumes wasm (`acdp-wasm`) via dispatch → `bump-acdp.yml` |
 | acdp-website | MDX | own ci | n/a — excluded from `standardize.sh` (private repo; protection API 403s) | npm+ga | — | Vercel | leaf |
 | agentcontextdistributionprotocol (the spec) | schemas / RFCs | own | ✅ (`auto-merge.yml@v1`), managed by `standardize.sh` | pip+ga | — | — | **spec source**; notifies `acdp-rs`, `acdp-verifier-py`, `acdp-registry-rs` via `notify-spec-consumers.yml` |
