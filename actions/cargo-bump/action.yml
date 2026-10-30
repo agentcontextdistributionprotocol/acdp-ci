@@ -1,0 +1,38 @@
+name: cargo-bump
+description: >-
+  Bump a crate in a cargo consumer, keeping each requirement's operator (an
+  exact `=x.y.z` pin stays exact), re-locking the root workspace and any extra
+  manifests, and moving matching `acdp*` cargo-vet exemptions. Fails closed on a
+  requirement it cannot rewrite. See bump.sh.
+
+inputs:
+  package:
+    description: 'Crate name as it appears in the consumer manifests.'
+    required: true
+  version:
+    description: 'Target version.'
+    required: true
+  extra-manifests:
+    description: 'Extra directories (each with its own Cargo.toml and Cargo.lock), whitespace or newline separated, relative to the repo root, bumped in lockstep with the root — e.g. a second workspace such as tools/live-smoke.'
+    required: false
+    default: ''
+  vet-config:
+    description: 'cargo-vet config whose acdp* exemptions follow the bump; skipped when the file does not exist.'
+    required: false
+    default: 'supply-chain/config.toml'
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure a Rust toolchain
+      shell: bash
+      run: |
+        command -v cargo >/dev/null || { curl -fsSL --proto "=https" --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1; echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"; }
+    - name: Bump manifests, lockfiles and vet exemptions
+      shell: bash
+      env:
+        PKG: ${{ inputs.package }}
+        T: ${{ inputs.version }}
+        EXTRA_MANIFESTS: ${{ inputs.extra-manifests }}
+        VET_CONFIG: ${{ inputs.vet-config }}
+      run: ${{ github.action_path }}/bump.sh
