@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Shadow `cargo` for tests/bump-cargo/run.sh. Models only
+# `cargo update -p PKG --precise T --manifest-path M`: in M's sibling Cargo.lock,
+# every registry package named PKG or PKG-* moves from its locked version to T
+# (acdp-rs releases its crates in lockstep). Calls are logged to $FAKE/calls.log.
+#   FAKE_CARGO_FAIL=1              the update fails
+#   FAKE_ALSO_MOVE='<name> <ver>'  a third-party crate also moves (a transitive re-resolve)
+set -euo pipefail
+: "${FAKE:?}"
+echo "cargo $*" >> "$FAKE/calls.log"
+[ "${FAKE_CARGO_FAIL:-0}" = 1 ] && { echo "error: failed to select a version" >&2; exit 101; }
+[ "$1" = update ] || { echo "shadow cargo: unsupported: $*" >&2; exit 2; }
+shift; pkg=""; t=""; m="Cargo.toml"
+while [ $# -gt 0 ]; do case "$1" in
+  -p) pkg="$2"; shift 2 ;; --precise) t="$2"; shift 2 ;; --manifest-path) m="$2"; shift 2 ;;
+  *) echo "shadow cargo: unexpected arg $1" >&2; exit 2 ;; esac; done
+lock="$(dirname "$m")/Cargo.lock"
+[ -f "$lock" ] || { echo "shadow cargo: no $lock" >&2; exit 2; }
+PKG="$pkg" T="$t" perl -i -00 -pe '
+  my $p = quotemeta($ENV{PKG});
+  s/^(version = ")[^"]+(")/$1$ENV{T}$2/m if /^name = "$p(-[^"]+)?"$/m && /^source = "registry\+/m;
+  if (my ($an, $av) = split / /, ($ENV{FAKE_ALSO_MOVE} // "")) {
+    s/^(version = ")[^"]+(")/$1$av$2/m if /^name = "\Q$an\E"$/m;
+  }
+' "$lock"

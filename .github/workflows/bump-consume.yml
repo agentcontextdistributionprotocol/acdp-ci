@@ -49,6 +49,11 @@ on:
         required: false
         type: string
         default: '22'
+      extra-manifests:
+        description: 'cargo only: extra directories (each with its own Cargo.toml + Cargo.lock), whitespace separated, bumped in lockstep with the root — e.g. tools/live-smoke'
+        required: false
+        type: string
+        default: ''
       allow-major:
         description: 'Arm auto-merge even on a major bump'
         required: false
@@ -179,25 +184,26 @@ jobs:
                 fs.writeFileSync("package.json", JSON.stringify(j,null,2)+"\n");
               ' ;;
             cargo)
-              command -v cargo >/dev/null || { curl -fsSL --proto "=https" --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1; }
-              source "$HOME/.cargo/env" 2>/dev/null || true
-              # Bump the version requirement in Cargo.toml in place — preserving
-              # features / table form, handling [dependencies] and
-              # [workspace.dependencies] — then re-lock. `cargo add` can't target
-              # a virtual workspace, and won't survive a featured table cleanly.
-              PKG="$PKG" T="$T" perl -i -pe '
-                my $p = quotemeta($ENV{PKG}); my $v = $ENV{T};
-                if (/^\s*$p\s*=/) {
-                  if (/\{/) { s/(version\s*=\s*")[^"]+(")/$1$v$2/ }
-                  else      { s/=\s*"[^"]+"/= "$v"/ }
-                }
-              ' Cargo.toml
-              cargo update -p "$PKG" --precise "$T" ;;
+              # Done by the next step (cargo-bump): keeps the requirement operator,
+              # re-locks extra-manifests too, moves acdp* vet exemptions (acdp-ci#47).
+              : ;;
             uv)
               curl -fsSL https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
               export PATH="$HOME/.local/bin:$PATH"
               uv lock --upgrade-package "$PKG" ;;
           esac
+
+      # cargo only: rewrite each requirement keeping its operator (an exact
+      # `=x.y.z` pin stays exact), re-lock the root and every extra-manifests
+      # dir, and move matching acdp* cargo-vet exemptions. Fails closed — and so
+      # opens no PR — on a requirement it cannot rewrite (acdp-ci#47).
+      - name: Bump manifests, lockfiles and vet exemptions (cargo)
+        if: ${{ inputs.ecosystem == 'cargo' && steps.v.outputs.changed == 'true' && steps.br.outputs.exists == 'false' }}
+        uses: agentcontextdistributionprotocol/acdp-ci/actions/cargo-bump@v1
+        with:
+          package: ${{ inputs.package }}
+          version: ${{ steps.v.outputs.target }}
+          extra-manifests: ${{ inputs.extra-manifests }}
 
       # npm only: wait for every platform (optional) package of the target,
       # relock, and verify `npm ci` would accept the lock. Fails the job — and

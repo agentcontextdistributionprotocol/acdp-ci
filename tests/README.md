@@ -1,7 +1,7 @@
 # Tests
 
-Three offline bash harnesses, each shadowing the external tool it would otherwise call
-(`gh`, `npm`) with a stub on `PATH` and asserting that the stub is the one in use (so a
+Four offline bash harnesses, each shadowing the external tool it would otherwise call
+(`gh`, `npm`, `cargo`) with a stub on `PATH` and asserting that the stub is the one in use (so a
 real binary can never make a case vacuous). None needs network or credentials.
 
 | Harness | Covers | Run |
@@ -9,6 +9,7 @@ real binary can never make a case vacuous). None needs network or credentials.
 | [`tests/standardize/`](standardize/README.md) | `scripts/standardize.sh` against JSON fixtures: drift guard, `--check`, registry baseline file, weakening guard, UNREGISTERED sweep, exit codes. `mutants.sh` is the mutation-coverage guard for it (needs `python3` and `jq`; **rewrites `scripts/standardize.sh` in place while running — start from a clean tree**). | `bash tests/standardize/run.sh` · `bash tests/standardize/mutants.sh` |
 | [`tests/auto-merge/`](auto-merge/run.sh) | `actions/auto-merge-gate` (`decide.sh`, `disarm.sh`): table-driven eligibility cases including deny lists and fail-safes. | `bash tests/auto-merge/run.sh` |
 | [`tests/bump-npm/`](bump-npm/run.sh) | `actions/npm-relock/relock.sh` against a shadow `npm` that models the publish race, plus wiring assertions on `bump-consume.yml`. Needs `shasum`, `node` and `jq`. `BUMP_NPM_LIVE=1` additionally runs one case against the real registry. | `bash tests/bump-npm/run.sh` |
+| [`tests/bump-cargo/`](bump-cargo/run.sh) | `actions/cargo-bump/bump.sh` against a shadow `cargo` that models `cargo update --precise`: operator kept (`=`, `^`, `~`, bare; table and string form), extra manifests re-locked, `acdp*` vet exemptions moved and third-party ones left alone, fail-closed cases, plus wiring assertions on `bump-consume.yml`. Needs `perl`. | `bash tests/bump-cargo/run.sh` |
 
 There is also a manual **docs consistency checker**, [`tests/docs/check-docs.sh`](docs/check-docs.sh):
 relative and sibling-repo links (file + heading anchor), line-number pins in prose, action
