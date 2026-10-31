@@ -11,17 +11,18 @@
 # looked at the main package, so it could not see this.
 #
 # Steps: (1) wait until every optionalDependency of PKG@T is served,
-# (2) relock, (3) verify — every optional dep present in the lock and
-# `npm ci --dry-run` exits 0 — retrying (1)-(3) a bounded number of times,
+# (2) relock, (3) verify — every optional dep present in the lock,
+# `npm ci --dry-run` exits 0, the lock pins PKG at exactly T, and every
+# tarball it resolves downloads — retrying (1)-(3) a bounded number of times,
 # (4) on exhaustion restore the original lock and exit 1, so the caller never
 # opens a PR from a broken lock.
 #
 # Env: PKG (required), T (required, target version)
-#      RELOCK_ATTEMPTS (default 12), RELOCK_SLEEP seconds (default 15) ≈ 3 min
+#      RELOCK_ATTEMPTS (default 24), RELOCK_SLEEP seconds (default 15) ≈ 6 min
 set -euo pipefail
 
 : "${PKG:?PKG is required}" "${T:?T is required}"
-ATTEMPTS="${RELOCK_ATTEMPTS:-12}"
+ATTEMPTS="${RELOCK_ATTEMPTS:-24}"
 SLEEP="${RELOCK_SLEEP:-15}"
 
 [ -f package-lock.json ] || { echo "::error::no package-lock.json in $(pwd)" >&2; exit 1; }
@@ -111,6 +112,40 @@ while [ "$attempt" -le "$ATTEMPTS" ]; do
       last_problem="npm ci --dry-run rejects the lockfile: $(head -c 400 "$BACKUP.err" | tr '\n' ' ')"
     fi
     rm -f "$BACKUP.err"
+  fi
+
+  if [ -z "$last_problem" ]; then
+    # (3b) the lock installs exactly PKG@T — the version the PR title names —
+    # and every tarball it resolves (PKG and its optional deps) downloads. The
+    # packument lists a version before its tarball is served, and `npm ci
+    # --dry-run` never fetches tarballs, so without this a bump PR's CI could
+    # 404 on `npm ci` (acdp-ui-console #186).
+    if ! check="$(OPTS="$OPTS" node -e '
+      const lock=require(process.cwd()+"/package-lock.json").packages||{};
+      const pkg=process.env.PKG, T=process.env.T;
+      const root=lock["node_modules/"+pkg]||lock["node_modules/"+pkg.split("/").pop()];
+      if (!root) { console.log("BAD\t"+pkg+" is not in the lockfile"); process.exit(0); }
+      if (root.version!==T) { console.log("BAD\tlockfile pins "+pkg+" at "+root.version+", not "+T); process.exit(0); }
+      const urls=[root.resolved];
+      const keys=Object.keys(lock);
+      for (const line of (process.env.OPTS||"").split("\n")) {
+        if (!line) continue;
+        const suffix="node_modules/"+line.split("\t")[0];
+        for (const k of keys) if (k===suffix||k.endsWith("/"+suffix)) urls.push(lock[k].resolved);
+      }
+      for (const u of urls) if (u) console.log("URL\t"+u);')"; then
+      last_problem="could not read package-lock.json"
+    elif bad="$(printf '%s\n' "$check" | awk -F'\t' '$1=="BAD"{print $2; exit}')" && [ -n "$bad" ]; then
+      last_problem="$bad"
+    else
+      while IFS=$'\t' read -r kind url; do
+        [ "$kind" = URL ] || continue
+        if ! curl -fsSL --max-time 60 -o /dev/null "$url"; then
+          last_problem="tarball not downloadable yet: $url"
+          break
+        fi
+      done <<<"$check"
+    fi
   fi
 
   if [ -z "$last_problem" ]; then

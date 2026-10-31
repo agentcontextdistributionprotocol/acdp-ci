@@ -78,13 +78,13 @@ out="$(run_relock)"; rc=$?
 # the fake install records published lines by name@spec; an alias is not modelled there, so only the wait step is asserted
 grep -q "npm view plat-real@0.14.4 version" "$FAKE/calls.log" && pass "alias: wait step views the real package name" || fail "alias: wait step views the real package name" "$(cat "$FAKE/calls.log")"
 newcase "$OPT4" "${ALLPUB[@]}"
-echo '{"packages":{"":{},"node_modules/@scope/acdp/node_modules/plat-darwin-arm64":{"version":"0.14.4"},"node_modules/plat-darwin-x64":{"version":"0.14.4"},"node_modules/plat-linux-x64-gnu":{"version":"0.14.4"}}}' > "$W/nested.json"
+echo '{"packages":{"":{},"node_modules/@scope/acdp":{"version":"0.14.4"},"node_modules/@scope/acdp/node_modules/plat-darwin-arm64":{"version":"0.14.4"},"node_modules/plat-darwin-x64":{"version":"0.14.4"},"node_modules/plat-linux-x64-gnu":{"version":"0.14.4"}}}' > "$W/nested.json"
 export FAKE_INSTALL_LOCK="$W/nested.json"
 out="$(run_relock)"; rc=$?
 unset FAKE_INSTALL_LOCK
 [ $rc -eq 0 ] && pass "nested lock key satisfies the presence check" || fail "nested lock key satisfies the presence check" "rc=$rc $out"
 newcase "$OPT4" "${ALLPUB[@]}"
-echo '{"packages":{"":{},"node_modules/xplat-darwin-arm64":{"version":"0.14.4"},"node_modules/plat-darwin-x64":{"version":"0.14.4"},"node_modules/plat-linux-x64-gnu":{"version":"0.14.4"}}}' > "$W/decoy.json"
+echo '{"packages":{"":{},"node_modules/@scope/acdp":{"version":"0.14.4"},"node_modules/xplat-darwin-arm64":{"version":"0.14.4"},"node_modules/plat-darwin-x64":{"version":"0.14.4"},"node_modules/plat-linux-x64-gnu":{"version":"0.14.4"}}}' > "$W/decoy.json"
 export FAKE_INSTALL_LOCK="$W/decoy.json" FAKE_CI_LENIENT=1
 out="$(run_relock)"; rc=$?
 unset FAKE_INSTALL_LOCK FAKE_CI_LENIENT
@@ -96,6 +96,25 @@ export FAKE_INSTALL_NEWER=1
 out="$(run_relock)"; rc=$?
 unset FAKE_INSTALL_NEWER
 [ $rc -eq 0 ] && pass "install resolves 0.14.5 against spec 0.14.4: still exit 0" || fail "install resolves 0.14.5 against spec 0.14.4: still exit 0" "rc=$rc $out"
+
+echo "== lock pins the root package at another version -> fails closed (title must match) =="
+newcase "$OPT4" "${ALLPUB[@]}"
+before="$(lockhash)"
+out="$(FAKE_ROOT_VERSION=0.14.5 run_relock)"; rc=$?
+[ $rc -eq 1 ] && pass "root at 0.14.5 for target 0.14.4: exit 1" || fail "root at 0.14.5 for target 0.14.4: exit 1" "rc=$rc $out"
+printf '%s' "$out" | grep -q "pins @scope/acdp at 0.14.5, not 0.14.4" && pass "root version mismatch: says why" || fail "root version mismatch: says why" "$out"
+[ "$before" = "$(lockhash)" ] && pass "root version mismatch: lock restored" || fail "root version mismatch: lock restored" "changed"
+
+echo "== packument lists T but its tarball is not served yet (acdp-ui-console #186) -> retry, then ok =="
+newcase "$OPT4" "${ALLPUB[@]}"
+out="$(FAKE_TARBALL_AFTER=2 ATT=4 run_relock)"; rc=$?
+[ $rc -eq 0 ] && pass "tarball served on the 3rd install: exit 0" || fail "tarball served on the 3rd install: exit 0" "rc=$rc $out"
+[ "$(cat "$FAKE/installs")" = 3 ] && pass "tarball race: retried until downloadable" || fail "tarball race: retried until downloadable" "installs=$(cat "$FAKE/installs")"
+newcase "$OPT4" "${ALLPUB[@]}"
+before="$(lockhash)"
+out="$(FAKE_TARBALL_AFTER=99 run_relock)"; rc=$?
+[ $rc -eq 1 ] && printf '%s' "$out" | grep -q "tarball not downloadable yet" && pass "tarball never served: exit 1, says why" || fail "tarball never served: exit 1, says why" "rc=$rc $out"
+[ "$before" = "$(lockhash)" ] && pass "tarball never served: lock restored" || fail "tarball never served: lock restored" "changed"
 
 echo "== unexpected crash after relock still restores the lock =="
 newcase "$OPT4" "${ALLPUB[@]}"
@@ -143,7 +162,7 @@ grep -q 'npm install --package-lock-only' "$WF" && fail "wiring: no unverified r
 if [ "${BUMP_NPM_LIVE:-0}" = 1 ]; then
   echo "== live: real registry, real npm =="
   PATH="${PATH#"$HERE/bin:"}"
-  W="$(mktemp -d)"; ( cd "$W" && echo '{"name":"c","version":"1.0.0","dependencies":{"@agentcontextdistributionprotocol/acdp":"^0.14.4"}}' > package.json \
+  W="$(mktemp -d)"; ( cd "$W" && echo '{"name":"c","version":"1.0.0","dependencies":{"@agentcontextdistributionprotocol/acdp":"0.14.4"}}' > package.json \
     && npm install --package-lock-only --ignore-scripts >/dev/null 2>&1 \
     && PKG=@agentcontextdistributionprotocol/acdp T=0.14.4 RELOCK_SLEEP=2 "$RELOCK" >/dev/null 2>&1 ); rc=$?
   [ $rc -eq 0 ] && pass "live: real acdp@0.14.4 verifies" || fail "live: real acdp@0.14.4 verifies" "rc=$rc"
