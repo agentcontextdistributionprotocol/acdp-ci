@@ -1,7 +1,7 @@
 # Tests
 
-Four offline bash harnesses, each shadowing the external tool it would otherwise call
-(`gh`, `npm`, `cargo`) with a stub on `PATH` and asserting that the stub is the one in use (so a
+Five offline bash harnesses, each shadowing the external tool it would otherwise call
+(`gh`, `npm`, `cargo`, `uv`) with a stub on `PATH` and asserting that the stub is the one in use (so a
 real binary can never make a case vacuous). None needs network or credentials.
 
 | Harness | Covers | Run |
@@ -10,6 +10,7 @@ real binary can never make a case vacuous). None needs network or credentials.
 | [`tests/auto-merge/`](auto-merge/run.sh) | `actions/auto-merge-gate` (`decide.sh`, `disarm.sh`): table-driven eligibility cases including deny lists and fail-safes. | `bash tests/auto-merge/run.sh` |
 | [`tests/bump-npm/`](bump-npm/run.sh) | `actions/npm-relock/relock.sh` against a shadow `npm` that models the publish race, plus wiring assertions on `bump-consume.yml`. Needs `shasum`, `node` and `jq`. `BUMP_NPM_LIVE=1` additionally runs one case against the real registry. | `bash tests/bump-npm/run.sh` |
 | [`tests/bump-cargo/`](bump-cargo/run.sh) | `actions/cargo-bump/bump.sh` against a shadow `cargo` that models `cargo update --precise`: operator kept (`=`, `^`, `~`, bare; table and string form), extra manifests re-locked, `acdp*` vet exemptions moved and third-party ones left alone, fail-closed cases, plus wiring assertions on `bump-consume.yml`. Needs `perl`. | `bash tests/bump-cargo/run.sh` |
+| [`tests/bump-uv/`](bump-uv/run.sh) | `actions/uv-relock/relock.sh` against a shadow `uv` that models an index serving the target late: retries then exact `T`, never-served fails closed with the lock byte-identical, a lock that pins another version or drops the package fails closed, backoff cap, wiring on `bump-consume.yml`. Needs `perl` and `shasum`. `BUMP_UV_LIVE=1` adds two real-uv + PyPI cases. | `bash tests/bump-uv/run.sh` |
 
 There is also a manual **docs consistency checker**, [`tests/docs/check-docs.sh`](docs/check-docs.sh):
 relative and sibling-repo links (file + heading anchor), line-number pins in prose, action
