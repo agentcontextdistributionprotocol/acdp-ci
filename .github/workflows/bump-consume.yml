@@ -63,7 +63,7 @@ on:
 jobs:
   bump:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     permissions: {}
     steps:
       - name: Mint GitHub App token
@@ -148,15 +148,24 @@ jobs:
           T: ${{ steps.v.outputs.target }}
         run: |
           set -euo pipefail
-          for i in $(seq 1 24); do
+          # The release dispatch can fire before every artifact is published
+          # (acdp-ui-console run 41121945953 gave up 6 s before acdp-wasm 0.19.0
+          # appeared), and propagation can take 10+ min: poll with backoff
+          # (5 s, 10 s, … capped at 30 s) up to WAIT_SECS. The relock steps
+          # below then wait for the exact version to be installable.
+          WAIT_SECS=720; deadline=$((SECONDS + WAIT_SECS)); i=0
+          while :; do
+            i=$((i + 1))
             case "$ECO" in
-              npm)   [ "$(npm view "$PKG@$T" version 2>/dev/null || true)" = "$T" ] && { echo ok; exit 0; } ;;
+              npm)   [ "$(npm view "$PKG@$T" version --prefer-online 2>/dev/null || true)" = "$T" ] && { echo ok; exit 0; } ;;
               cargo) curl -fsSL -A 'acdp-ci-bump' "https://crates.io/api/v1/crates/$PKG/$T" >/dev/null 2>&1 && { echo ok; exit 0; } ;;
               uv)    curl -fsSL "https://pypi.org/pypi/$PKG/$T/json"       >/dev/null 2>&1 && { echo ok; exit 0; } ;;
             esac
-            echo "waiting for $PKG@$T ($i/24)…"; sleep 5
+            [ "$SECONDS" -ge "$deadline" ] && break
+            s=$((5 * i)); [ "$s" -gt 30 ] && s=30
+            echo "waiting for $PKG@$T (attempt $i, next in ${s}s)…"; sleep "$s"
           done
-          echo "::error::$PKG@$T not on the registry after ~2 min"; exit 1
+          echo "::error::$PKG@$T not on the registry after $((WAIT_SECS / 60)) min — no PR opened"; exit 1
 
       - name: Apply bump (manifest + lockfile)
         if: ${{ steps.v.outputs.changed == 'true' && steps.br.outputs.exists == 'false' }}

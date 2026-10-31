@@ -15,6 +15,9 @@
 #   FAKE_CI_LENIENT=1           ci --dry-run always succeeds (isolates relock.sh's own lock check)
 #   FAKE_CI_FAIL=1              `ci --dry-run` fails even for a complete lock
 #   FAKE_INSTALL_DROP=<name>    install never records <name> (stale-metadata model)
+#   FAKE_ROOT_VERSION=<v>       install locks $PKG at <v> instead of $T
+#   FAKE_TARBALL_AFTER=k        $PKG's tarball is downloadable only from the (k+1)th install
+# install records $PKG with a file:// `resolved` under $FAKE/tarballs (curl reads it).
 set -euo pipefail
 : "${FAKE:?}"
 echo "npm $*" >> "$FAKE/calls.log"
@@ -47,7 +50,12 @@ case "$cmd" in
       | reduce ($o[0]|to_entries[]) as $e (.;
           if ($e.key != $drop) and (($p|index($e.key+"@"+$e.value)) != null)
           then .packages["node_modules/"+$e.key]={version:(if $newer=="1" then "0.14.5" else $e.value end)} else . end)' \
-      package-lock.json > "$tmp" && mv "$tmp" package-lock.json ;;
+      package-lock.json > "$tmp" && mv "$tmp" package-lock.json
+    ni=$(cat "$FAKE/installs" 2>/dev/null || echo 0); ni=$((ni+1)); echo "$ni" > "$FAKE/installs"
+    mkdir -p "$FAKE/tarballs"; tgz="$FAKE/tarballs/root-${T:-x}.tgz"
+    [ "$ni" -gt "${FAKE_TARBALL_AFTER:-0}" ] && echo tgz > "$tgz"
+    jq --arg k "node_modules/${PKG:-}" --arg v "${FAKE_ROOT_VERSION:-${T:-}}" --arg r "file://$tgz" \
+      '.packages[$k]={version:$v,resolved:$r}' package-lock.json > "$tmp" && mv "$tmp" package-lock.json ;;
   ci)
     [ "${FAKE_CI_LENIENT:-0}" = 1 ] && exit 0
     [ "${FAKE_CI_FAIL:-0}" = 1 ] && { echo "npm error code EUSAGE" >&2; exit 1; }

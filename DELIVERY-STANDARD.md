@@ -164,12 +164,12 @@ sequenceDiagram
   else branch deps/NAME-VER already exists
     B-->>D: no-op, PR already open
   else new bump
-    B->>R: poll until the target is served (24 x 5 s)
+    B->>R: poll until the target is served (backoff 5-30 s, up to 12 min)
     Note over B: timeout means the job fails and no PR opens
     alt ecosystem npm
       B->>C: rewrite dependency and any npm alias
       B->>R: npm-relock waits for every optional platform package
-      B->>B: relock, verify lock and npm ci --dry-run (fail closed)
+      B->>B: relock, verify lock, npm ci --dry-run, exact T, tarballs download (fail closed)
     else ecosystem cargo
       B->>C: cargo-bump rewrites Cargo.toml (operator kept), cargo update --precise
       B->>C: same for each extra-manifests dir, move acdp* vet exemptions

@@ -4,4 +4,3 @@
 - 2026-10-09: `scripts/standardize.sh` prerequisite text says apply needs `admin:org`; a branch-protection PUT needs repo admin — unverified, left as is.
 - 2026-10-09: `--check <typo'd-repo>` prints "unreadable repo(s)" for an unmanaged name (exit code 1 is correct; wording is misleading).
 - 2026-10-18: when acdp-rs moves npm to Trusted Publishing and drops `NPM_TOKEN`, update the DELIVERY-STANDARD publish-table npm rows and the Credentials paragraph again.
-- 2026-10-30: npm bump writes `^T`; if a newer patch lands within the relock window the lock could resolve above the PR title — npm-relock checks optional deps, not the root version. No occurrence seen.

@@ -14,7 +14,7 @@ inputs:
   attempts:
     description: 'Max relock/verify attempts.'
     required: false
-    default: '12'
+    default: '24'
   sleep:
     description: 'Seconds between attempts.'
     required: false
