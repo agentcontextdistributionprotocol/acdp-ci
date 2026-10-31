@@ -188,9 +188,9 @@ jobs:
               # re-locks extra-manifests too, moves acdp* vet exemptions (acdp-ci#47).
               : ;;
             uv)
-              curl -fsSL https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
-              export PATH="$HOME/.local/bin:$PATH"
-              uv lock --upgrade-package "$PKG" ;;
+              # Done by uv-relock (below): locks exactly PKG==T, retrying until
+              # the index serves it, failing closed otherwise.
+              : ;;
           esac
 
       # cargo only: rewrite each requirement keeping its operator (an exact
@@ -211,6 +211,17 @@ jobs:
       - name: Re-lock and verify (npm)
         if: ${{ inputs.ecosystem == 'npm' && steps.v.outputs.changed == 'true' && steps.br.outputs.exists == 'false' }}
         uses: agentcontextdistributionprotocol/acdp-ci/actions/npm-relock@v1
+        with:
+          package: ${{ inputs.package }}
+          version: ${{ steps.v.outputs.target }}
+
+      # uv only: lock exactly PKG==T, retrying with capped backoff until the
+      # simple index serves T (it lags the JSON API the wait step polls), and
+      # verify uv.lock pins T. Fails closed — no PR whose lock installs a
+      # different version than its title.
+      - name: Re-lock and verify (uv)
+        if: ${{ inputs.ecosystem == 'uv' && steps.v.outputs.changed == 'true' && steps.br.outputs.exists == 'false' }}
+        uses: agentcontextdistributionprotocol/acdp-ci/actions/uv-relock@v1
         with:
           package: ${{ inputs.package }}
           version: ${{ steps.v.outputs.target }}

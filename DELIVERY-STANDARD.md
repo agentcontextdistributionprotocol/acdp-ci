@@ -174,7 +174,7 @@ sequenceDiagram
       B->>C: cargo-bump rewrites Cargo.toml (operator kept), cargo update --precise
       B->>C: same for each extra-manifests dir, move acdp* vet exemptions
     else ecosystem uv
-      B->>C: uv lock --upgrade-package
+      B->>C: uv-relock locks exactly PKG==T, retries until the index serves it (fail closed)
     end
     B->>C: push branch, open PR
     alt breaking bump (major, or 0.x minor) and not allow-major
@@ -197,7 +197,12 @@ sequenceDiagram
    virtual workspace and keeps each requirement's operator, so an exact `=x.y.z` pin stays
    exact. It re-locks every `extra-manifests` dir (a second workspace with its own lockfile)
    along with the root, and moves `[[exemptions.acdp*]]` in `supply-chain/config.toml`.
-   It fails closed on a range requirement it can't rewrite (acdp-ci#47).
+   It fails closed on a range requirement it can't rewrite (acdp-ci#47). The `uv` path
+   ([`actions/uv-relock`](actions/uv-relock/README.md)) locks exactly `PKG==T`. PyPI's
+   JSON API, which the wait step polls, sees a release before the simple index uv resolves
+   against, and an unpinned `uv lock --upgrade-package` locked one release behind the PR
+   title (acdp-playground #110, #111). It retries with capped backoff and fails closed
+   unless `uv.lock` pins `T`.
 3. Missed dispatch → Dependabot's monthly `acdp` group opens the same PR later
    (`acdp-playground` excepted — see the propagation-graph section above).
 
@@ -552,7 +557,7 @@ merge past protection, and cannot touch the `v1` tag at all.
 ## Releasing `acdp-ci` (the `v1` tag)
 
 Every consumer resolves `acdp-ci/.github/workflows/*@v1` at that one
-**mutable** tag on every run. The composite actions `actions/npm-relock`, `actions/cargo-bump` and `actions/auto-merge-gate` are
+**mutable** tag on every run. The composite actions `actions/npm-relock`, `actions/cargo-bump`, `actions/uv-relock` and `actions/auto-merge-gate` are
 referenced at `@v1` too (by `bump-consume.yml` / `auto-merge.yml`), so they float with
 the workflows and roll back with them — a workflow run from a branch or pinned by SHA
 before the move cannot resolve them. `acdp-ci/actions/checkout-spec` is the

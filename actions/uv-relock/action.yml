@@ -1,0 +1,42 @@
+name: uv-relock
+description: >-
+  Re-lock a uv consumer to exactly PKG==T, retrying with capped backoff until
+  the index serves T, and failing closed (original uv.lock restored) if it
+  never does. See relock.sh.
+
+inputs:
+  package:
+    description: 'SDK package name as it appears in the consumer uv.lock.'
+    required: true
+  version:
+    description: 'Target version.'
+    required: true
+  attempts:
+    description: 'Max relock attempts.'
+    required: false
+    default: '10'
+  sleep:
+    description: 'Base seconds between attempts (linear backoff).'
+    required: false
+    default: '10'
+  sleep-max:
+    description: 'Cap on seconds between attempts.'
+    required: false
+    default: '60'
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure uv
+      shell: bash
+      run: |
+        command -v uv >/dev/null || { curl -fsSL https://astral.sh/uv/install.sh | sh >/dev/null 2>&1; echo "$HOME/.local/bin" >> "$GITHUB_PATH"; }
+    - name: Relock and verify
+      shell: bash
+      env:
+        PKG: ${{ inputs.package }}
+        T: ${{ inputs.version }}
+        RELOCK_ATTEMPTS: ${{ inputs.attempts }}
+        RELOCK_SLEEP: ${{ inputs.sleep }}
+        RELOCK_SLEEP_MAX: ${{ inputs.sleep-max }}
+      run: ${{ github.action_path }}/relock.sh

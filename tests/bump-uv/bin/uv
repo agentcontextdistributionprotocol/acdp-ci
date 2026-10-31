@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Shadow `uv` for tests/bump-uv/run.sh. Models only
+# `uv lock --upgrade-package NAME==VER --refresh-package NAME`: it succeeds and
+# pins NAME at VER in ./uv.lock once VER is "served", else errors like real uv.
+# State lives in $FAKE; calls are logged to $FAKE/calls.log.
+#   FAKE_SERVED_AFTER=k   VER is served from the (k+1)th call on (default 0 = now)
+#   FAKE_LOCK_VERSION=X   the lock succeeds but pins X (a resolver that ignored the pin)
+#   FAKE_LOCK_DROP=1      the lock succeeds but NAME is absent from uv.lock
+set -euo pipefail
+: "${FAKE:?}"
+echo "uv $*" >> "$FAKE/calls.log"
+[ "$1" = lock ] || { echo "shadow uv: unsupported: $*" >&2; exit 2; }
+shift; spec=""; refresh=""
+while [ $# -gt 0 ]; do case "$1" in
+  --upgrade-package) spec="$2"; shift 2 ;; --refresh-package) refresh="$2"; shift 2 ;;
+  *) echo "shadow uv: unexpected arg $1" >&2; exit 2 ;; esac; done
+case "$spec" in *==*) ;; *) echo "shadow uv: --upgrade-package without ==VER: $spec" >&2; exit 3 ;; esac
+name="${spec%%==*}"; ver="${spec#*==}"
+n=$(cat "$FAKE/calls" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$FAKE/calls"
+if [ "$n" -le "${FAKE_SERVED_AFTER:-0}" ]; then
+  echo "  ╰─▶ Because there is no version of $name==$ver and your project depends on $name==$ver, we can conclude that your project's requirements are unsatisfiable." >&2
+  exit 1
+fi
+[ -n "${FAKE_LOCK_VERSION:-}" ] && ver="$FAKE_LOCK_VERSION"
+if [ "${FAKE_LOCK_DROP:-0}" = 1 ]; then
+  perl -i -00 -ne "print unless /^name = \"\Q$name\E\"\$/m" uv.lock
+else
+  NAME="$name" VER="$ver" perl -i -00 -pe 's/^(version = ")[^"]+(")/$1$ENV{VER}$2/m if /^name = "\Q$ENV{NAME}\E"$/m' uv.lock
+fi
